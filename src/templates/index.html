@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detecção de Buracos - Suple 360</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/vue.global.js"></script>
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <h1>Detecção de Buraco.</h1>
+            <p class="subtitle">Sistema de Monitoramento em Tempo Real</p>
+
+            {% raw %}
+            <div class="video-lidar-grid">
+                <div class="video-container">
+                    <div class="mjpeg-stream">
+                        <img src="/video_feed" alt="Stream da câmera" @error="handleStreamError">
+                    </div>
+                    <div class="status-bar">
+                        <span>
+                            <span class="status-indicator live"></span>
+                            {{ streamStatus }}
+                        </span>
+                        <span>{{ currentTime }}</span>
+                    </div>
+                </div>
+                
+                <div class="lidar-container" :class="{ 'zoomed': lidarZoom }">
+                    <div class="lidar-header">
+                        <h3>Scanner LIDAR</h3>
+                        <div class="lidar-actions">
+                            <button class="lidar-zoom-toggle" @click="toggleLidarZoom">
+                                {{ lidarZoom ? '🔎 Voltar' : '🔎 Ampliar' }}
+                            </button>
+                            <button class="lidar-open-tab" @click="openLidarNewTab">
+                                🖥️ Tela cheia
+                            </button>
+                        </div>
+                    </div>
+                    <p class="lidar-tip">Linha vermelha = frente do scanner/veículo</p>
+                    <canvas ref="lidarCanvas" :width="lidarZoom ? 700 : 400" :height="lidarZoom ? 700 : 400"></canvas>
+                    <div class="lidar-scale-control">
+                        <label>Escala: <input type="range" v-model.number="maxScale" min="0.5" max="10" step="0.5" @input="drawLidarMap"></label>
+                        <span class="lidar-scale-display">{{ maxScale.toFixed(1) }}m</span>
+                    </div>
+                    <div class="lidar-info">
+                        <span v-if="lidarOnline" style="color: #4CAF50;">● Online</span>
+                        <span v-else style="color: #f44336;">● Offline</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-grid">
+                <div class="info-card">
+                    <h3>Total de Buraco.</h3>
+                    <div class="value">{{ totalBuracos }}</div>
+                </div>
+                <div class="info-card">
+                    <h3>Status da Câmera</h3>
+                    <div class="value" :style="{ color: cameraOnline ? '#4CAF50' : '#f44336' }">
+                        {{ cameraOnline ? 'Online' : 'Offline' }}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Histórico de Detecções -->
+            <div style="margin-top: 30px; padding: 20px; background: #1e1e1e; border-radius: 10px;">
+                <h2>📋 Histórico de Detecções</h2>
+                <p style="color: #999; font-size: 14px;">Buracos detectados com dimensões do LIDAR</p>
+                
+                <div v-if="detections.length === 0" style="text-align: center; padding: 30px; color: #666;">
+                    <p>Nenhuma detecção registrada ainda</p>
+                </div>
+                
+                <div v-else class="detections-grid">
+                    <div v-for="det in detections" :key="det.id" class="detection-card">
+                        <div class="detection-header">
+                            <span style="font-weight: bold; color: #667eea;">Detecção #{{ det.id }}</span>
+                            <span style="font-size: 12px; color: #999;">{{ det.timestamp }}</span>
+                        </div>
+                        
+                        <img :src="'/deteccoes/' + det.photo_path" class="detection-img" :alt="'Buraco ' + det.id">
+                        
+                        <div class="detection-info">
+                            <p><strong>Buracos encontrados:</strong> {{ det.num_buracos }}</p>
+                            <div v-for="buraco in det.buracos" :key="buraco.id" style="margin-top: 10px; padding: 10px; background: #2a2a2a; border-radius: 5px; font-size: 13px;">
+                                <p><strong>Buraco {{ buraco.id }}:</strong></p>
+                                <p>🎯 Confiança: {{ (buraco.confianca * 100).toFixed(1) }}%</p>
+                                <p>📏 Distância: {{ buraco.distancia_m ? buraco.distancia_m + ' m' : 'N/A' }}</p>
+                                <p>↔️ Largura: {{ buraco.largura_m ? buraco.largura_m.toFixed(2) + ' m' : 'N/A' }}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="btn-primary" @click="refreshStream">
+                    🔄 Atualizar Stream
+                </button>
+                <button class="btn-secondary" @click="loadDetections">
+                    🔄 Carregar Histórico
+                </button>
+                <button class="btn-secondary" @click="openStats">
+                    📊 Estatísticas
+                </button>
+                <button class="btn-secondary" @click="testLidar">
+                    📡 Testar LIDAR
+                </button>
+                <button class="btn-danger" @click="clearHistory">
+                    🗑️ Limpar Histórico
+                </button>
+            </div>
+
+            <div class="footer">
+                <p>Sistema rodando em: <strong>{{ serverIP }}</strong></p>
+                <p>Última atualização: {{ lastUpdate }}</p>
+            </div>
+            {% endraw %}
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    streamStatus: 'Conectando...',
+                    totalBuracos: 0,
+                    cameraOnline: false,
+                    currentTime: new Date().toLocaleTimeString('pt-BR'),
+                    lastUpdate: 'Aguardando dados...',
+                    serverIP: window.location.hostname + ':' + window.location.port,
+                    lidarData: {},
+                    lidarOnline: false,
+                    detections: [],
+                    lidarZoom: false,
+                    maxScale: 8  // Escala máxima padrão em metros
+                };
+            },
+            mounted() {
+                if (window.location.hash === '#lidar-full') {
+                    this.lidarZoom = true;
+                    this.$nextTick(() => this.drawLidarMap());
+                }
+
+                // Atualizar hora a cada segundo
+                setInterval(() => {
+                    this.currentTime = new Date().toLocaleTimeString('pt-BR');
+                }, 1000);
+
+                // Simular conexão com stream
+                setTimeout(() => {
+                    this.streamStatus = 'Ao vivo';
+                    this.cameraOnline = true;
+                    this.lastUpdate = new Date().toLocaleTimeString('pt-BR');
+                }, 2000);
+
+                // Carregar dados de buracos
+                this.loadDetections();
+                
+                // Polling de detecções a cada 2 segundos
+                setInterval(() => {
+                    this.loadDetections();
+                }, 2000);
+                
+                // Polling LIDAR e renderização do mapa
+                this.updateLidar();
+                setInterval(() => {
+                    this.updateLidar();
+                }, 500); // Atualiza a cada 500ms
+            },
+            methods: {
+                handleStreamError() {
+                    this.streamStatus = 'Erro ao conectar';
+                    this.cameraOnline = false;
+                },
+                refreshStream() {
+                    this.streamStatus = 'Reconectando...';
+                    // Forçar recarga do stream
+                    const img = document.querySelector('.video-container img');
+                    if (img) {
+                        img.src = '/video_feed?' + Date.now();
+                    }
+                    setTimeout(() => {
+                        this.streamStatus = 'Ao vivo';
+                        this.cameraOnline = true;
+                    }, 1000);
+                },
+                loadDetections() {
+                    fetch('/api/detections/recent')
+                        .then(res => res.json())
+                        .then(data => {
+                            this.detections = data.detections || [];
+                            // Atualiza total de buracos
+                            this.totalBuracos = data.detections.reduce((sum, d) => sum + d.num_buracos, 0);
+                            this.lastUpdate = new Date().toLocaleTimeString('pt-BR');
+                        })
+                        .catch(err => {
+                            console.error('Erro ao carregar detecções:', err);
+                        });
+                },
+                openStats() {
+                    fetch('/api/detections/stats')
+                        .then(res => res.json())
+                        .then(stats => {
+                            alert('📊 Estatísticas do Sistema\n\n' +
+                                  'Total de Detecções: ' + stats.total_detections + '\n' +
+                                  'Total de Buracos: ' + stats.total_buracos + '\n' +
+                                  'Atualmente exibindo: ' + this.detections.length + ' detecções recentes');
+                        })
+                        .catch(err => alert('Erro ao carregar estatísticas'));
+                },
+                testLidar() {
+                    fetch('/api/test-lidar')
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                let msg = '📡 Teste de Distâncias LIDAR\n\n';
+                                msg += 'Setores com dados: ' + data.total_sectors + '\n\n';
+                                data.lidar_test.forEach(sector => {
+                                    msg += `Setor ${sector.sector} (${sector.angle_deg}°):\n`;
+                                    msg += `  Distância Média: ${sector.avg_distance_m}m\n`;
+                                    msg += `  Mínima: ${sector.min_distance_m}m\n`;
+                                    msg += `  Máxima: ${sector.max_distance_m}m\n`;
+                                    msg += `  Pontos: ${sector.num_points}\n\n`;
+                                });
+                                alert(msg);
+                            } else {
+                                alert('❌ LIDAR offline ou sem dados');
+                            }
+                        })
+                        .catch(err => alert('Erro ao testar LIDAR: ' + err));
+                },
+                clearHistory() {
+                    if (confirm('⚠️ ATENÇÃO!\n\nIsso vai deletar:\n- Todos os registros do banco de dados\n- Todas as imagens de detecção\n\nTem certeza?')) {
+                        // Limpa a tela imediatamente
+                        this.detections = [];
+                        this.totalBuracos = 0;
+                        
+                        fetch('/api/clear-history', { method: 'POST' })
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.success) {
+                                    alert('✅ Histórico limpo com sucesso!');
+                                    // Recarrega após um pequeno delay para garantir que o banco foi reinicializado
+                                    setTimeout(() => this.loadDetections(), 500);
+                                } else {
+                                    alert('❌ Erro ao limpar: ' + data.error);
+                                    this.loadDetections(); // Restaura os dados
+                                }
+                            })
+                            .catch(err => {
+                                alert('Erro: ' + err);
+                                this.loadDetections(); // Restaura os dados em caso de erro
+                            });
+                    }
+                },
+                toggleLidarZoom() {
+                    this.lidarZoom = !this.lidarZoom;
+                    // Redesenha após o próximo tick para aplicar o novo tamanho
+                    this.$nextTick(() => this.drawLidarMap());
+                },
+                openLidarNewTab() {
+                    const url = window.location.origin + '/lidar';
+                    window.open(url, '_blank');
+                },
+                updateLidar() {
+                    fetch('/api/lidar/latest')
+                        .then(res => res.json())
+                        .then(data => {
+                            this.lidarData = data.sectors || {};
+                            this.lidarOnline = data.available || false;
+                            this.drawLidarMap();
+                        })
+                        .catch(err => {
+                            console.error('Erro ao buscar LIDAR:', err);
+                            this.lidarOnline = false;
+                        });
+                },
+                drawLidarMap() {
+                    const canvas = this.$refs.lidarCanvas;
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    const w = canvas.width;
+                    const h = canvas.height;
+                    const cx = w / 2;
+                    const cy = h / 2;
+                    const maxRadius = Math.min(w, h) / 2 - 20;
+                    const maxDist = this.maxScale * 1000;  // Usar escala dinâmica em mm
+
+                    // Limpa canvas
+                    ctx.fillStyle = '#1a1a1a';
+                    ctx.fillRect(0, 0, w, h);
+
+                    // Grade circular com labels de distância
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    ctx.fillStyle = '#666';
+                    ctx.font = '10px monospace';
+                    ctx.textAlign = 'center';
+                    for (let r = maxRadius / 4; r <= maxRadius; r += maxRadius / 4) {
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                        ctx.stroke();
+                        
+                        // Label de distância (a cada 2m)
+                        const distMetros = (r / maxRadius) * this.maxScale;
+                        ctx.fillText(distMetros.toFixed(1) + 'm', cx, cy - r - 5);
+                    }
+
+                    // Linhas angulares (cada 45°)
+                    for (let angle = 0; angle < 360; angle += 45) {
+                        const rad = (angle - 90) * Math.PI / 180;
+                        ctx.beginPath();
+                        ctx.moveTo(cx, cy);
+                        ctx.lineTo(cx + maxRadius * Math.cos(rad), cy + maxRadius * Math.sin(rad));
+                        ctx.stroke();
+                    }
+
+                    // Desenha contorno do ambiente (conectando pontos LIDAR)
+                    if (this.lidarOnline && Object.keys(this.lidarData).length > 0) {
+                        // Converte dados para array ordenado por ângulo
+                        const points = [];
+                        for (const [sector, distance] of Object.entries(this.lidarData)) {
+                            const angle = parseFloat(sector);
+                            const rad = (angle - 90) * Math.PI / 180;
+                            const distClamped = Math.min(distance, maxDist);
+                            const r = (distClamped / maxDist) * maxRadius;
+                            const x = cx + r * Math.cos(rad);
+                            const y = cy + r * Math.sin(rad);
+                            points.push({ angle, x, y, distance, rad });
+                        }
+                        
+                        // Ordena por ângulo
+                        points.sort((a, b) => a.angle - b.angle);
+
+                        // Desenha linhas conectando os pontos (contorno do ambiente)
+                        ctx.strokeStyle = '#00ff00';
+                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.7;
+                        
+                        if (points.length > 1) {
+                            ctx.beginPath();
+                            ctx.moveTo(points[0].x, points[0].y);
+                            for (let i = 1; i < points.length; i++) {
+                                ctx.lineTo(points[i].x, points[i].y);
+                            }
+                            // Fecha o polígono
+                            ctx.lineTo(points[0].x, points[0].y);
+                            ctx.stroke();
+                        }
+
+                        // Desenha os pontos LIDAR como dots
+                        ctx.globalAlpha = 1;
+                        ctx.fillStyle = '#00ff00';
+                        for (const point of points) {
+                            ctx.beginPath();
+                            ctx.arc(point.x, point.y, 3, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+
+                        // Calcula e exibe largura estimada da rodovia (diferença lateral)
+                        ctx.globalAlpha = 0.8;
+                        ctx.strokeStyle = '#ffff00';
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([3, 3]);
+                        
+                        // Encontra os pontos mais largos laterais (~90° e ~270°)
+                        const leftPoints = points.filter(p => p.angle >= 60 && p.angle <= 120);
+                        const rightPoints = points.filter(p => p.angle >= 240 && p.angle <= 300);
+                        
+                        if (leftPoints.length > 0 && rightPoints.length > 0) {
+                            const leftP = leftPoints.reduce((a, b) => a.distance < b.distance ? a : b);
+                            const rightP = rightPoints.reduce((a, b) => a.distance < b.distance ? a : b);
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(leftP.x, leftP.y);
+                            ctx.lineTo(rightP.x, rightP.y);
+                            ctx.stroke();
+                            
+                            // Label de largura
+                            const width = (leftP.distance + rightP.distance) / 1000; // em metros
+                            const midX = (leftP.x + rightP.x) / 2;
+                            const midY = (leftP.y + rightP.y) / 2;
+                            ctx.globalAlpha = 1;
+                            ctx.fillStyle = '#ffff00';
+                            ctx.font = 'bold 12px monospace';
+                            ctx.textAlign = 'center';
+                            ctx.fillText(`L: ${width.toFixed(2)}m`, midX, midY + 15);
+                        }
+                        
+                        ctx.setLineDash([]);
+                        ctx.globalAlpha = 1;
+                    }
+
+                    // Centro (posição do sensor)
+                    ctx.fillStyle = '#667eea';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    // Label do centro
+                    ctx.fillStyle = '#667eea';
+                    ctx.font = '10px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('LIDAR', cx, cy + 18);
+
+                    // Marcador frontal (0°) - reta vermelha indicando frente
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 3;
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(cx, cy - maxRadius * 0.9);
+                    ctx.stroke();
+                    
+                    // Triângulo na frente
+                    ctx.fillStyle = '#ff0000';
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy - maxRadius * 0.95);
+                    ctx.lineTo(cx - 5, cy - maxRadius * 0.85);
+                    ctx.lineTo(cx + 5, cy - maxRadius * 0.85);
+                    ctx.fill();
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

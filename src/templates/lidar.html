@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner LIDAR - Suple 360</title>
+    <script src="/static/js/vue.global.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #0a0a0a;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        #app {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .lidar-fullscreen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            gap: 20px;
+        }
+
+        .lidar-header {
+            color: white;
+            text-align: center;
+        }
+
+        .lidar-header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: #667eea;
+        }
+
+        .lidar-header p {
+            font-size: 1rem;
+            color: #999;
+            margin-bottom: 10px;
+        }
+
+        .lidar-status {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2rem;
+            color: white;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+
+        .status-indicator.online {
+            background-color: #4CAF50;
+            box-shadow: 0 0 10px #4CAF50;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.offline {
+            background-color: #f44336;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        canvas {
+            border-radius: 10px;
+            background: #1a1a1a;
+            border: 2px solid #333;
+            box-shadow: 0 0 30px rgba(102, 126, 234, 0.3);
+        }
+
+        .lidar-controls {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            flex-wrap: wrap;
+        }
+
+        .scale-control {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: white;
+        }
+
+        .scale-control label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .scale-control input[type="range"] {
+            width: 200px;
+            height: 6px;
+            border-radius: 3px;
+            background: #333;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .scale-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            box-shadow: 0 0 10px #667eea;
+        }
+
+        .scale-control input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+            box-shadow: 0 0 10px #667eea;
+        }
+
+        .scale-display {
+            background: #2a2a2a;
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: 1px solid #667eea;
+            font-weight: 600;
+            color: #667eea;
+            min-width: 100px;
+            text-align: center;
+        }
+
+        .lidar-info {
+            color: #999;
+            font-size: 0.9rem;
+            margin-top: 20px;
+            max-width: 600px;
+            text-align: center;
+            line-height: 1.6;
+        }
+
+        .lidar-info strong {
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        {% raw %}
+        <div class="lidar-fullscreen">
+            <div class="lidar-header">
+                <h1>📡 Scanner LIDAR A1M8</h1>
+                <p>Mapa de ambiente em tempo real</p>
+                <div class="lidar-status">
+                    <span v-if="lidarOnline" class="lidar-status-text">
+                        <span class="status-indicator online"></span>
+                        Online
+                    </span>
+                    <span v-else class="lidar-status-text">
+                        <span class="status-indicator offline"></span>
+                        Offline
+                    </span>
+                    <span style="color: #ccc;">|</span>
+                    <span>{{ currentTime }}</span>
+                </div>
+            </div>
+
+            <canvas ref="lidarCanvas" width="1000" height="1000"></canvas>
+
+            <div class="lidar-controls">
+                <div class="scale-control">
+                    <label for="scaleSlider">Escala Máxima:</label>
+                    <input type="range" id="scaleSlider" v-model.number="maxScale" min="0.5" max="10" step="0.5" @input="updateLidar">
+                    <div class="scale-display">{{ maxScale.toFixed(1) }}m</div>
+                </div>
+            </div>
+                <p><strong>Linha Vermelha:</strong> Frente do scanner/veículo</p>
+                <p><strong>Pontos Verdes:</strong> Superfícies detectadas (estrada, paredes, objetos)</p>
+                <p><strong>Linha Amarela:</strong> Largura estimada da rodovia</p>
+                <p><strong>Escala:</strong> Ajustável de 0.5m a 10m</p>
+            </div>
+        </div>
+        {% endraw %}
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            data() {
+                return {
+                    lidarData: {},
+                    lidarOnline: false,
+                    currentTime: new Date().toLocaleTimeString('pt-BR'),
+                    maxScale: 8  // Escala máxima padrão em metros
+                };
+            },
+            mounted() {
+                // Atualizar hora a cada segundo
+                setInterval(() => {
+                    this.currentTime = new Date().toLocaleTimeString('pt-BR');
+                }, 1000);
+
+                // Polling LIDAR e renderização
+                this.updateLidar();
+                setInterval(() => {
+                    this.updateLidar();
+                }, 500);
+            },
+            methods: {
+                updateLidar() {
+                    fetch('/api/lidar/latest')
+                        .then(res => res.json())
+                        .then(data => {
+                            this.lidarData = data.sectors || {};
+                            this.lidarOnline = data.available || false;
+                            this.drawLidarMap();
+                        })
+                        .catch(err => {
+                            console.error('Erro ao buscar LIDAR:', err);
+                            this.lidarOnline = false;
+                        });
+                },
+                drawLidarMap() {
+                    const canvas = this.$refs.lidarCanvas;
+                    if (!canvas) return;
+                    const ctx = canvas.getContext('2d');
+                    const w = canvas.width;
+                    const h = canvas.height;
+                    const cx = w / 2;
+                    const cy = h / 2;
+                    const maxRadius = Math.min(w, h) / 2 - 60;
+                    const maxDist = this.maxScale * 1000;  // Usar escala dinâmica
+
+                    // Limpa canvas
+                    ctx.fillStyle = '#1a1a1a';
+                    ctx.fillRect(0, 0, w, h);
+
+                    // Grade circular com labels
+                    ctx.strokeStyle = '#333';
+                    ctx.lineWidth = 1;
+                    ctx.fillStyle = '#666';
+                    ctx.font = 'bold 14px monospace';
+                    ctx.textAlign = 'center';
+                    for (let r = maxRadius / 4; r <= maxRadius; r += maxRadius / 4) {
+                        ctx.beginPath();
+                        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                        ctx.stroke();
+                        
+                        const distMetros = (r / maxRadius) * this.maxScale;  // Usar escala dinâmica
+                        ctx.fillText(distMetros.toFixed(1) + 'm', cx, cy - r - 15);
+                    }
+
+                    // Linhas angulares (cada 45°)
+                    for (let angle = 0; angle < 360; angle += 45) {
+                        const rad = (angle - 90) * Math.PI / 180;
+                        ctx.beginPath();
+                        ctx.moveTo(cx, cy);
+                        ctx.lineTo(cx + maxRadius * Math.cos(rad), cy + maxRadius * Math.sin(rad));
+                        ctx.stroke();
+                    }
+
+                    // Desenha contorno do ambiente
+                    if (this.lidarOnline && Object.keys(this.lidarData).length > 0) {
+                        const points = [];
+                        for (const [sector, distance] of Object.entries(this.lidarData)) {
+                            const angle = parseFloat(sector);
+                            const rad = (angle - 90) * Math.PI / 180;
+                            const distClamped = Math.min(distance, maxDist);
+                            const r = (distClamped / maxDist) * maxRadius;
+                            const x = cx + r * Math.cos(rad);
+                            const y = cy + r * Math.sin(rad);
+                            points.push({ angle, x, y, distance, rad });
+                        }
+                        
+                        points.sort((a, b) => a.angle - b.angle);
+
+                        // Desenha contorno
+                        ctx.strokeStyle = '#00ff00';
+                        ctx.lineWidth = 3;
+                        ctx.globalAlpha = 0.8;
+                        
+                        if (points.length > 1) {
+                            ctx.beginPath();
+                            ctx.moveTo(points[0].x, points[0].y);
+                            for (let i = 1; i < points.length; i++) {
+                                ctx.lineTo(points[i].x, points[i].y);
+                            }
+                            ctx.lineTo(points[0].x, points[0].y);
+                            ctx.stroke();
+                        }
+
+                        // Desenha pontos
+                        ctx.globalAlpha = 1;
+                        ctx.fillStyle = '#00ff00';
+                        for (const point of points) {
+                            ctx.beginPath();
+                            ctx.arc(point.x, point.y, 4, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+
+                        // Largura estimada
+                        ctx.globalAlpha = 0.8;
+                        ctx.strokeStyle = '#ffff00';
+                        ctx.lineWidth = 2;
+                        ctx.setLineDash([5, 5]);
+                        
+                        const leftPoints = points.filter(p => p.angle >= 60 && p.angle <= 120);
+                        const rightPoints = points.filter(p => p.angle >= 240 && p.angle <= 300);
+                        
+                        if (leftPoints.length > 0 && rightPoints.length > 0) {
+                            const leftP = leftPoints.reduce((a, b) => a.distance < b.distance ? a : b);
+                            const rightP = rightPoints.reduce((a, b) => a.distance < b.distance ? a : b);
+                            
+                            ctx.beginPath();
+                            ctx.moveTo(leftP.x, leftP.y);
+                            ctx.lineTo(rightP.x, rightP.y);
+                            ctx.stroke();
+                            
+                            const width = (leftP.distance + rightP.distance) / 1000;
+                            const midX = (leftP.x + rightP.x) / 2;
+                            const midY = (leftP.y + rightP.y) / 2;
+                            ctx.globalAlpha = 1;
+                            ctx.fillStyle = '#ffff00';
+                            ctx.font = 'bold 18px monospace';
+                            ctx.textAlign = 'center';
+                            ctx.fillText(`L: ${width.toFixed(2)}m`, midX, midY + 25);
+                        }
+                        
+                        ctx.setLineDash([]);
+                        ctx.globalAlpha = 1;
+                    }
+
+                    // Centro
+                    ctx.fillStyle = '#667eea';
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.fillStyle = '#667eea';
+                    ctx.font = 'bold 14px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('LIDAR', cx, cy + 25);
+
+                    // Marcador frontal (0°)
+                    ctx.strokeStyle = '#ff0000';
+                    ctx.lineWidth = 4;
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(cx, cy - maxRadius * 0.92);
+                    ctx.stroke();
+                    
+                    // Triângulo na frente
+                    ctx.fillStyle = '#ff0000';
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy - maxRadius * 0.96);
+                    ctx.lineTo(cx - 8, cy - maxRadius * 0.88);
+                    ctx.lineTo(cx + 8, cy - maxRadius * 0.88);
+                    ctx.fill();
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
