@@ -1141,3 +1141,32 @@ Buraco #1 (Track ID: 1):
 **Criado em:** Janeiro 2026  
 **Versão:** 2.1 (Fase 1 - OpenCV + Tracking)  
 **Próxima Fase:** Mapeamento 2D Bird's Eye View
+
+
+---
+
+## 🗺️ Fase 2: Mapeamento 2D (Bird's Eye View)
+
+### Módulos Adicionados:
+- **mapper.py** - Construtor de mapas 2D top-down
+- **map_utils.py** - Conversões de coordenadas
+- **templates/map.html** - Interface web do mapa
+
+### Funcionalidades:
+✅ Mapa 20x20 metros (800x800 pixels)  
+✅ Plotagem de buracos com cores por severidade  
+✅ Visualização de LIDAR 360°  
+✅ Exportação para PNG  
+✅ Interface web com auto-atualização  
+
+### Acessar:
+http://localhost:5000/map
+
+### Para mais detalhes:
+Ver arquivo **FASE2_RESUMO.md** para documentação completa.
+
+---
+
+**Versão:** 2.2 (Fase 2 - Mapeamento 2D)  
+**Última Atualização:** 06/Janeiro/2026
+
