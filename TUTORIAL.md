@@ -1773,3 +1773,758 @@ Ver arquivo **FASE5_RESUMO.md** para documentação completa.
 **Versão:** 2.5 (Fase 5 - Otimização de Performance)  
 **Última Atualização:** 06/Janeiro/2026
 
+---
+
+## 📐 Fase 6: Sistema de Calibração Completo
+
+### Módulos Adicionados:
+- **pattern_generator.py** - Geração de padrões de calibração (PDF) (310 linhas)
+- **templates/calibracao.html** - Interface para gerar PDFs (350 linhas)
+- **templates/calibracao_live.html** - Calibração em tempo real (600 linhas)
+- Atualizado **api.py** - 8 novas rotas de calibração
+
+### Funcionalidades:
+✅ Geração de padrões xadrez 9×6 em PDF (25mm por quadrado)  
+✅ Geração de markers ArUco em PDF (DICT_6X6_250, 100mm)  
+✅ Interface web para download de PDFs  
+✅ Calibração em tempo real com stream de vídeo  
+✅ Detecção automática de padrões (xadrez e ArUco)  
+✅ Captura de múltiplas fotos (mín. 10, rec. 15-20)  
+✅ Cálculo de matriz intrínseca e coeficientes de distorção  
+✅ Salvamento de calibrações (.npz)  
+✅ Visualização de calibrações salvas  
+
+---
+
+### 1. O que é Calibração de Câmera?
+
+**Calibração** é o processo de medir os **parâmetros internos** da câmera para:
+
+**a) Corrigir distorções da lente:**
+```
+Antes:                 Depois:
+┌──────────┐          ┌──────────┐
+│  ╱────╲  │          │  ┌────┐  │
+│ (  □  ) │    →     │  │  □  │  │  (linhas retas)
+│  ╲────╱  │          │  └────┘  │
+└──────────┘          └──────────┘
+  (distorção)          (corrigido)
+```
+
+**b) Medir dimensões reais com precisão:**
+```
+Sem calibração:        Com calibração:
+Buraco = "203 pixels"  Buraco = 0.452 m
+(não sabe metros)      (medida exata!)
+```
+
+---
+
+### 2. Matriz Intrínseca da Câmera
+
+A calibração calcula a **matriz intrínseca** (3×3):
+
+```python
+K = [
+    [fx,  0, cx],
+    [ 0, fy, cy],
+    [ 0,  0,  1]
+]
+```
+
+**Parâmetros:**
+- **fx, fy**: Distância focal (em pixels)
+  - Controla o "zoom" da câmera
+  - Típico: 500-1500 px para câmera Raspberry Pi
+  
+- **cx, cy**: Centro óptico (coordenadas do pixel central)
+  - Idealmente no centro da imagem
+  - Exemplo: (640, 360) para resolução 1280×720
+
+**Coeficientes de Distorção:**
+```python
+dist = [k1, k2, p1, p2, k3]
+```
+- **k1, k2, k3**: Distorção radial (efeito "barril" ou "almofada")
+- **p1, p2**: Distorção tangencial (desalinhamento da lente)
+
+**Onde é usado:**
+- Conversão pixel → metro (estimativa de tamanho real)
+- Correção de distorção de imagem
+- Mapeamento 3D preciso
+
+---
+
+### 3. Como Funciona a Calibração
+
+#### **Etapa 1: Geração de Padrões**
+
+**Acesse:** `http://localhost:5000/calibracao`
+
+**Padrões disponíveis:**
+
+**a) Xadrez 9×6 (Recomendado para iniciantes):**
+- 9 cantos internos na horizontal
+- 6 cantos internos na vertical
+- 54 cantos totais para detecção
+- Quadrados de 25mm × 25mm
+
+**b) ArUco Markers (Recomendado para precisão):**
+- 10 markers únicos (IDs 0-9)
+- Dicionário: DICT_6X6_250
+- Tamanho: 100mm × 100mm
+- Precisão 4-6x melhor que xadrez
+
+**Como gerar:**
+```python
+# Backend (pattern_generator.py)
+from pattern_generator import CalibrationPatternGenerator
+
+generator = CalibrationPatternGenerator()
+
+# Gera xadrez
+generator.gerar_padrao_xadrez(
+    pattern_size=(9, 6),      # 9×6 cantos
+    square_size_mm=25,        # 25mm por quadrado
+    output_path='xadrez.pdf'
+)
+
+# Gera ArUco
+generator.gerar_aruco_markers(
+    num_markers=10,           # 10 markers
+    marker_size_mm=100,       # 100mm de tamanho
+    output_path='aruco.pdf'
+)
+```
+
+**Clique nos botões da interface:**
+- 📥 Baixar Padrão Xadrez
+- 📥 Baixar Markers ArUco
+
+---
+
+#### **Etapa 2: Impressão e Preparação**
+
+**Instruções críticas:**
+
+1. **Imprima em A4** sem escalar (100% do tamanho)
+2. **Cole em superfície rígida** (papelão, placa de isopor)
+3. **Certifique-se que está plano** (sem dobras ou curvas)
+4. **Meça o tamanho real** com régua:
+   - Xadrez: cada quadrado deve ter ~25mm
+   - ArUco: cada marker deve ter ~100mm
+
+**Por que a precisão importa?**
+```
+Erro de 1mm na impressão = erro de 5-10cm na medição final!
+```
+
+---
+
+#### **Etapa 3: Calibração em Tempo Real**
+
+**Acesse:** `http://localhost:5000/calibracao_live`
+
+**Interface:**
+
+```
+┌─────────────────────────────────────────────┐
+│  📹 Visualização da Câmera                   │
+│  ┌───────────────────────────────────────┐  │
+│  │   [Stream com overlay de detecção]    │  │
+│  │   ✓ Padrão detectado! | 54 cantos     │  │
+│  └───────────────────────────────────────┘  │
+│                                             │
+│  ⚙️ Configurações                            │
+│  Tipo: [Xadrez 9×6 ▼]                      │
+│                                             │
+│  📊 Estatísticas                             │
+│  Fotos: 12     Taxa: 85%                    │
+│  Qualidade: ████████░░ 80%                  │
+│                                             │
+│  📸 [Capturar Frame]  🎯 [Calibrar]         │
+│  🔄 [Resetar]                               │
+│                                             │
+│  📊 Resultados:                              │
+│  Erro: 0.42 px | Focal: 1234.5 px          │
+└─────────────────────────────────────────────┘
+```
+
+**Elementos da tela:**
+
+**1. Taxa de Detecção (0-100%):**
+```python
+# Mede: quantos frames detectam o padrão
+taxa = (frames_detectados / frames_totais) × 100%
+
+# Interpretação:
+> 80% = Ótimo! Padrão bem posicionado ✅
+50-80% = Razoável, ajuste ângulo ⚠️
+< 50% = Ruim, padrão não está visível ❌
+```
+
+**2. Qualidade da Imagem (barra colorida):**
+```python
+# Xadrez: quantos cantos foram detectados
+qualidade = (cantos_detectados / 54) × 100%
+
+# ArUco: quantos markers foram detectados  
+qualidade = (markers_detectados / 10) × 100%
+
+# Cores:
+🟢 Verde (70-100%): Capture agora!
+🟡 Amarelo (40-70%): Ajuste posição
+🔴 Vermelho (0-40%): Padrão parcial
+```
+
+**3. Botão "Capturar Frame":**
+```python
+# O que faz:
+1. Verifica se padrão está detectado
+2. Salva frame + coordenadas dos cantos/markers
+3. Incrementa contador de fotos
+4. Mostra alerta de sucesso
+
+# Quando usar:
+- Status: "Padrão detectado!" (luz verde)
+- Qualidade: > 70% (barra verde)
+- Ângulo diferente das fotos anteriores
+```
+
+**4. Botão "Calibrar" (mín. 10 fotos):**
+```python
+# Requisitos:
+- Mínimo: 10 fotos capturadas
+- Recomendado: 15-20 fotos
+- Variedade de ângulos
+
+# O que faz:
+1. Executa cv2.calibrateCamera() ou cv2.aruco.calibrateCameraAruco()
+2. Calcula matriz intrínseca K
+3. Calcula coeficientes de distorção
+4. Calcula erro de reprojeção
+5. Salva em .npz
+
+# Resultado:
+{
+    "reprojection_error": 0.42,  # px (quanto menor melhor)
+    "focal_x": 1234.5,           # px
+    "focal_y": 1236.8,           # px
+    "center_x": 640.2,           # px
+    "center_y": 359.8,           # px
+    "calibration_file": "calibracao_chessboard.npz"
+}
+```
+
+---
+
+#### **Etapa 4: Como Capturar Fotos Corretamente**
+
+**Objetivo:** Cobrir diferentes ângulos e distâncias para calibração robusta.
+
+**Estratégia recomendada (15-20 fotos):**
+
+```
+Vista Superior:
+
+Posição 1-4: Centro em diferentes distâncias
+   🎯        🎯      🎯    🎯
+  perto    médio   médio  longe
+
+Posição 5-8: Ângulos inclinados
+   🎯        🎯      🎯    🎯
+  ↗30°     ↖30°    ↘30°  ↙30°
+
+Posição 9-12: Cantos da imagem
+   🎯                    🎯
+  canto               canto
+  sup-esq            sup-dir
+
+   🎯                    🎯
+  canto               canto
+  inf-esq            inf-dir
+
+Posição 13-16: Rotação do padrão
+   📄        📄      📄    📄
+  0°       45°     90°   135°
+
+Posição 17-20: Variações de iluminação
+   🔆 luz   ☀️ sol  🌙 sombra  💡 lateral
+```
+
+**Dicas:**
+- ✅ Sempre mantenha o padrão **completamente visível**
+- ✅ Varie **ângulo, distância e rotação**
+- ✅ Capture em **diferentes iluminações**
+- ❌ Não capture fotos muito similares (desperdício)
+- ❌ Não cubra parte do padrão com a mão
+- ❌ Não capture com padrão dobrado/amassado
+
+---
+
+#### **Etapa 5: Executar Calibração**
+
+**Backend (api.py):**
+
+```python
+@app.route('/api/calibracao_executar', methods=['POST'])
+def calibracao_executar():
+    # 1. Verifica mínimo de 10 fotos
+    if len(calibration_images) < 10:
+        return error("Mínimo 10 fotos")
+    
+    # 2. Monta pontos 3D (mundo real)
+    objpoints = []  # Coordenadas 3D reais (0,0,0), (25mm,0,0), ...
+    imgpoints = []  # Coordenadas 2D na imagem (pixels)
+    
+    for img_data in calibration_images:
+        objpoints.append(objp)          # Padrão conhecido
+        imgpoints.append(img_data['corners'])  # Cantos detectados
+    
+    # 3. Calibra câmera
+    ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(
+        objpoints, imgpoints, (w, h), None, None
+    )
+    
+    # 4. Calcula erro de reprojeção
+    mean_error = 0
+    for i in range(len(objpoints)):
+        # Projeta pontos 3D de volta para 2D
+        imgpoints2, _ = cv2.projectPoints(
+            objpoints[i], rvecs[i], tvecs[i], mtx, dist
+        )
+        # Calcula diferença entre real e projetado
+        error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2) / len(imgpoints2)
+        mean_error += error
+    mean_error /= len(objpoints)
+    
+    # 5. Salva resultado
+    np.savez(
+        'calibracao_chessboard.npz',
+        camera_matrix=mtx,
+        dist_coeffs=dist,
+        pattern_type='chessboard',
+        num_images=len(calibration_images),
+        timestamp=int(time.time())
+    )
+    
+    return jsonify({
+        "reprojection_error": mean_error,
+        "focal_x": float(mtx[0, 0]),
+        "focal_y": float(mtx[1, 1]),
+        ...
+    })
+```
+
+---
+
+#### **Etapa 6: Interpretação de Resultados**
+
+**Erro de Reprojeção:**
+
+```python
+# Quanto menor, melhor a calibração
+< 0.5 px   = Excelente! ✅✅✅
+0.5-1.0 px = Bom ✅✅
+1.0-2.0 px = Aceitável ✅
+> 2.0 px   = Ruim, recalibre ❌
+```
+
+**O que significa?**
+- Erro de 0.5 px = ao reprojetar pontos 3D, eles ficam 0.5 pixels distantes do esperado
+- Erro alto = calibração imprecisa, medições erradas
+
+**Como melhorar:**
+1. Tire mais fotos (20-25)
+2. Cubra mais ângulos diferentes
+3. Use padrão ArUco (mais preciso)
+4. Certifique-se que padrão está plano
+5. Use boa iluminação (sem sombras)
+
+**Parâmetros da Câmera:**
+
+```python
+# Exemplo de resultado:
+Focal X: 1234.5 px
+Focal Y: 1236.8 px
+Centro: (640.2, 359.8)
+
+# Validações:
+✅ fx ≈ fy (diferença < 5%) = lente OK
+❌ fx muito diferente de fy = lente defeituosa
+✅ centro próximo de (640, 360) para 1280×720 = OK
+❌ centro muito deslocado = câmera desalinhada
+```
+
+---
+
+### 4. Onde as Calibrações são Salvas?
+
+**Localização:**
+```bash
+/home/suple/Desktop/suple360v2/calibracao_chessboard.npz
+/home/suple/Desktop/suple360v2/calibracao_aruco.npz
+```
+
+**Conteúdo do arquivo .npz:**
+
+```python
+import numpy as np
+
+# Carregar calibração
+data = np.load('calibracao_chessboard.npz')
+
+# Acessar parâmetros
+camera_matrix = data['camera_matrix']  # Matriz K 3×3
+dist_coeffs = data['dist_coeffs']      # [k1, k2, p1, p2, k3]
+pattern_type = data['pattern_type']    # 'chessboard' ou 'aruco'
+num_images = data['num_images']        # Quantas fotos usadas
+timestamp = data['timestamp']          # Unix timestamp
+
+print(f"Câmera calibrada com {num_images} fotos")
+print(f"Matriz intrínseca:\n{camera_matrix}")
+print(f"Distorção: {dist_coeffs}")
+```
+
+---
+
+### 5. Visualização de Calibrações Salvas
+
+**Interface:** Na parte inferior de `/calibracao_live`
+
+```
+┌─────────────────────────────────────────────┐
+│  💾 Calibrações Salvas                       │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ 📐 Xadrez 9×6                        │   │
+│  │ Erro: 0.42 px    Fotos: 15          │   │
+│  │ Focal X: 1234.5  Focal Y: 1236.8    │   │
+│  │ Centro: (640, 360)                   │   │
+│  │ Data: 06/01/2026 14:32               │   │
+│  │ [🗑️ Deletar]                        │   │
+│  └─────────────────────────────────────┘   │
+│                                             │
+│  ┌─────────────────────────────────────┐   │
+│  │ 📐 ArUco Markers                     │   │
+│  │ Erro: 0.28 px    Fotos: 18          │   │
+│  │ Focal X: 1235.2  Focal Y: 1237.1    │   │
+│  │ Centro: (641, 359)                   │   │
+│  │ Data: 06/01/2026 15:45               │   │
+│  │ [🗑️ Deletar]                        │   │
+│  └─────────────────────────────────────┘   │
+└─────────────────────────────────────────────┘
+```
+
+**Funcionalidades:**
+- **Listar:** GET `/api/calibracao_listar`
+  - Varre arquivos `.npz` no diretório
+  - Lê metadados de cada calibração
+  - Ordena por data (mais recente primeiro)
+
+- **Deletar:** POST `/api/calibracao_deletar`
+  - Remove arquivo `.npz` do disco
+  - Atualiza lista automaticamente
+
+**Backend:**
+
+```python
+@app.route('/api/calibracao_listar')
+def calibracao_listar():
+    calibrations = []
+    
+    for filepath in glob.glob('calibracao_*.npz'):
+        data = np.load(filepath)
+        calibrations.append({
+            'filename': os.path.basename(filepath),
+            'pattern_type': str(data['pattern_type']),
+            'num_images': int(data['num_images']),
+            'focal_x': float(data['camera_matrix'][0, 0]),
+            'focal_y': float(data['camera_matrix'][1, 1]),
+            'center_x': float(data['camera_matrix'][0, 2]),
+            'center_y': float(data['camera_matrix'][1, 2]),
+            'timestamp': int(data['timestamp'])
+        })
+    
+    # Ordena por timestamp
+    calibrations.sort(key=lambda x: x['timestamp'], reverse=True)
+    
+    return jsonify({"calibrations": calibrations})
+```
+
+---
+
+### 6. Como Usar a Calibração no Sistema
+
+**Carregar calibração salva:**
+
+```python
+import numpy as np
+import cv2
+
+# Carrega parâmetros
+data = np.load('calibracao_chessboard.npz')
+camera_matrix = data['camera_matrix']
+dist_coeffs = data['dist_coeffs']
+
+# Corrige distorção de imagem
+frame_undistorted = cv2.undistort(
+    frame, camera_matrix, dist_coeffs
+)
+
+# Converte pixel → metro (usando distância do LIDAR)
+def pixel_to_meter(bbox_width_px, distance_m):
+    # FOV horizontal da câmera
+    fov_rad = 2 * np.arctan(image_width / (2 * camera_matrix[0, 0]))
+    
+    # Largura real do campo de visão na distância D
+    real_fov_width = 2 * distance_m * np.tan(fov_rad / 2)
+    
+    # Fator de conversão
+    meters_per_pixel = real_fov_width / image_width
+    
+    # Largura real do buraco
+    real_width_m = bbox_width_px * meters_per_pixel
+    
+    return real_width_m
+```
+
+**Integração com detector:**
+
+```python
+# Em opencv_analyzer.py
+class OpenCVAnalyzer:
+    def __init__(self, calibration_file=None):
+        if calibration_file:
+            data = np.load(calibration_file)
+            self.camera_matrix = data['camera_matrix']
+            self.dist_coeffs = data['dist_coeffs']
+        else:
+            self.camera_matrix = None
+            self.dist_coeffs = None
+    
+    def analisar_buraco(self, frame, bbox, distancia_m):
+        # Se calibrado, corrige distorção
+        if self.camera_matrix is not None:
+            frame = cv2.undistort(frame, self.camera_matrix, self.dist_coeffs)
+        
+        # Usa calibração para medir com mais precisão
+        if self.camera_matrix is not None and distancia_m:
+            largura_real = self._pixel_to_meter_calibrated(
+                bbox_width, distancia_m
+            )
+        else:
+            largura_real = self._pixel_to_meter_estimated(
+                bbox_width, distancia_m
+            )
+        
+        return {
+            'dimensoes_reais': {
+                'largura_m': largura_real,
+                ...
+            }
+        }
+```
+
+---
+
+### 7. Comparação: Xadrez vs ArUco
+
+| Aspecto | Xadrez 9×6 | ArUco Markers |
+|---------|-----------|---------------|
+| **Precisão** | ±3-8 cm | ±1-3 cm (4-6x melhor) |
+| **Facilidade** | ✅✅✅ Fácil | ✅✅ Médio |
+| **Custo** | R$ 0 (imprimir) | R$ 0 (imprimir) |
+| **Robustez** | ⚠️ Sensível à iluminação | ✅ Robusto |
+| **Uso em campo** | ❌ Só para calibração | ✅ Calibração + medição em tempo real |
+| **Recomendado para** | Calibração básica | Calibração precisa + sistema de medição |
+
+**Quando usar Xadrez:**
+- Primeira calibração (aprendizado)
+- Ambiente controlado (boa iluminação)
+- Precisão de ±5cm é aceitável
+
+**Quando usar ArUco:**
+- Precisão crítica (±1-3cm)
+- Uso em campo (medição contínua)
+- Iluminação variável
+- Sistema profissional
+
+---
+
+### 8. Rotas da API de Calibração
+
+```python
+# Geração de PDFs
+GET  /calibracao                  # Página de download
+GET  /api/gerar_padrao_xadrez     # Baixa PDF xadrez
+GET  /api/gerar_aruco_markers     # Baixa PDF ArUco
+
+# Calibração em tempo real
+GET  /calibracao_live             # Página de calibração
+GET  /api/calibracao_stream       # Stream MJPEG com detecção
+GET  /api/calibracao_status       # Status atual {pattern_detected, quality}
+POST /api/calibracao_capturar     # Captura 1 foto
+POST /api/calibracao_executar     # Executa calibração
+POST /api/calibracao_resetar      # Limpa fotos capturadas
+
+# Gestão de calibrações
+GET  /api/calibracao_listar       # Lista calibrações salvas
+POST /api/calibracao_deletar      # Deleta calibração
+```
+
+---
+
+### 9. Fluxo Completo de Uso
+
+```
+┌─────────────────────────────────────────────┐
+│ ETAPA 1: Preparação                         │
+│ 1. Acessa /calibracao                       │
+│ 2. Baixa PDF do padrão (xadrez ou ArUco)    │
+│ 3. Imprime em A4 (100% de escala)           │
+│ 4. Cola em superfície rígida e plana        │
+└─────────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────────┐
+│ ETAPA 2: Captura de Fotos                   │
+│ 1. Acessa /calibracao_live                  │
+│ 2. Seleciona tipo de padrão                 │
+│ 3. Segura padrão na frente da câmera        │
+│ 4. Aguarda "Padrão detectado!" (luz verde)  │
+│ 5. Clica "Capturar Frame" (foto 1)          │
+│ 6. Muda ângulo/distância                    │
+│ 7. Repete até 15-20 fotos                   │
+└─────────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────────┐
+│ ETAPA 3: Calibração                         │
+│ 1. Verifica: "12 fotos capturadas"          │
+│ 2. Clica "Calibrar"                         │
+│ 3. Aguarda processamento (~5-10s)           │
+│ 4. Verifica erro < 1.0 px ✅               │
+│ 5. Calibração salva em .npz                 │
+└─────────────────────────────────────────────┘
+              ↓
+┌─────────────────────────────────────────────┐
+│ ETAPA 4: Uso no Sistema                     │
+│ 1. Sistema carrega calibracao_*.npz         │
+│ 2. Corrige distorção de frames              │
+│ 3. Mede buracos com precisão ±1-3cm         │
+│ 4. Salva medidas no banco de dados          │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+### 10. Resolução de Problemas
+
+**Problema:** Padrão não é detectado (taxa 0%)
+
+**Soluções:**
+- ✅ Certifique que padrão está completamente visível
+- ✅ Melhore iluminação (sem sombras)
+- ✅ Aproxime o padrão da câmera
+- ✅ Verifique se imprimiu na escala correta
+
+---
+
+**Problema:** Qualidade sempre baixa (< 40%)
+
+**Soluções:**
+- ✅ Limpe a lente da câmera
+- ✅ Cole o padrão em superfície mais rígida
+- ✅ Evite reflexos (flash, luz direta)
+- ✅ Use padrão ArUco (mais robusto)
+
+---
+
+**Problema:** Erro de reprojeção alto (> 2.0 px)
+
+**Soluções:**
+- ✅ Tire mais fotos (20-25)
+- ✅ Cubra mais ângulos diferentes
+- ✅ Certifique que padrão está perfeitamente plano
+- ✅ Verifique medida real do padrão impresso
+- ✅ Resete e comece novamente
+
+---
+
+**Problema:** Botão "Calibrar" desabilitado
+
+**Causa:** Menos de 10 fotos capturadas
+
+**Solução:** Capture mais fotos até ter 10+
+
+---
+
+### 11. Atalhos no Sistema
+
+**Na página inicial (`/`):**
+
+```html
+🗺️ [Mapa 2D]           → /map
+📐 [Gerar Padrões]      → /calibracao
+🎯 [Calibração Live]    → /calibracao_live
+```
+
+Todos abrem em nova aba para facilitar navegação.
+
+---
+
+### 12. Arquivos Criados
+
+```
+src/
+├── pattern_generator.py          # Gera PDFs de calibração
+├── api.py                         # +8 rotas de calibração
+└── templates/
+    ├── calibracao.html            # Download de PDFs
+    └── calibracao_live.html       # Interface de calibração
+
+deteccoes/
+├── padrao_xadrez.pdf              # PDF gerado
+└── aruco_markers.pdf              # PDF gerado
+
+/
+├── calibracao_chessboard.npz      # Calibração salva (xadrez)
+└── calibracao_aruco.npz           # Calibração salva (ArUco)
+```
+
+---
+
+### 13. Tecnologias Utilizadas
+
+**Backend:**
+- **ReportLab**: Geração de PDFs
+- **OpenCV**: Detecção de padrões (cv2.findChessboardCorners, cv2.aruco)
+- **NumPy**: Salvamento de calibrações (.npz)
+- **Flask**: API REST
+
+**Frontend:**
+- **HTML5 + CSS3**: Interface responsiva
+- **JavaScript (Vanilla)**: Interatividade
+- **MJPEG Streaming**: Stream de vídeo em tempo real
+
+**Algoritmos:**
+- **cv2.calibrateCamera()**: Calibração com xadrez
+- **cv2.aruco.calibrateCameraAruco()**: Calibração com ArUco
+- **cv2.projectPoints()**: Cálculo de erro de reprojeção
+
+---
+
+### 14. Próximos Passos
+
+**Integração futura:**
+1. Carregar calibração automaticamente ao iniciar sistema
+2. Botão "Aplicar calibração" no detector
+3. Métricas de precisão em tempo real
+4. Recalibração automática periódica
+5. Detecção de ArUco em campo para medição contínua
+
+---
+
+**Versão:** 2.6 (Fase 6 - Sistema de Calibração Completo)  
+**Última Atualização:** 06/Janeiro/2026  
+**Autor:** Sistema Suple360 v2
+

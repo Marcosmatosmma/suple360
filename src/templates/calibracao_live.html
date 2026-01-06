@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calibração em Tempo Real - Suple360</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+
+        .video-container {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+        }
+
+        #videoStream {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .video-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.detecting {
+            background: #10b981;
+        }
+
+        .status-indicator.waiting {
+            background: #f59e0b;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        h2 {
+            color: #1f2937;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .pattern-selector {
+            margin-bottom: 20px;
+        }
+
+        .pattern-selector label {
+            display: block;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 16px;
+            background: white;
+            cursor: pointer;
+            transition: border-color 0.3s;
+        }
+
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            color: white;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .quality-bar {
+            margin-bottom: 20px;
+        }
+
+        .quality-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 600;
+        }
+
+        .progress-bar {
+            height: 25px;
+            background: #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 12px;
+        }
+
+        .progress-fill.low {
+            background: linear-gradient(90deg, #ef4444 0%, #f87171 100%);
+        }
+
+        .progress-fill.medium {
+            background: linear-gradient(90deg, #f59e0b 0%, #fbbf24 100%);
+        }
+
+        .instructions {
+            background: #f3f4f6;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .instructions h3 {
+            color: #1f2937;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .instructions ul {
+            margin-left: 20px;
+            color: #4b5563;
+            line-height: 1.8;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-capture {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+
+        .btn-capture:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(16, 185, 129, 0.4);
+        }
+
+        .btn-calibrate {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-calibrate:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-reset {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+        }
+
+        .btn-reset:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(239, 68, 68, 0.4);
+        }
+
+        .results {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 10px;
+            border: 2px solid #e5e7eb;
+        }
+
+        .results h3 {
+            color: #1f2937;
+            margin-bottom: 15px;
+        }
+
+        .result-item {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 14px;
+            color: #374151;
+        }
+
+        .result-item strong {
+            color: #667eea;
+        }
+
+        .calibration-list {
+            display: grid;
+            gap: 15px;
+        }
+
+        .calibration-item {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+
+        .calibration-item h4 {
+            margin: 0 0 10px 0;
+            color: #1f2937;
+            font-size: 1.1em;
+        }
+
+        .calibration-item .meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            font-size: 14px;
+            color: #4b5563;
+        }
+
+        .calibration-item .meta strong {
+            color: #667eea;
+        }
+
+        .calibration-item button {
+            margin-top: 10px;
+            padding: 8px 15px;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .calibration-item button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 3px 10px rgba(239, 68, 68, 0.3);
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .alert.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 2px solid #10b981;
+        }
+
+        .alert.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 2px solid #ef4444;
+        }
+
+        .alert.info {
+            background: #dbeafe;
+            color: #1e40af;
+            border: 2px solid #3b82f6;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 1200px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎯 Calibração em Tempo Real</h1>
+
+        <div class="grid">
+            <div class="card">
+                <h2>📹 Visualização da Câmera</h2>
+                <div class="video-container">
+                    <img id="videoStream" src="/api/calibracao_stream" alt="Stream da câmera">
+                    <div class="video-overlay">
+                        <span class="status-indicator waiting" id="statusIndicator"></span>
+                        <span id="statusText">Aguardando padrão...</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>⚙️ Configurações</h2>
+
+                <div class="pattern-selector">
+                    <label for="patternType">Tipo de Padrão:</label>
+                    <select id="patternType">
+                        <option value="chessboard">Tabuleiro Xadrez (9x6)</option>
+                        <option value="aruco">Markers ArUco</option>
+                    </select>
+                </div>
+
+                <div class="stats">
+                    <div class="stat-box">
+                        <div class="stat-value" id="capturedCount">0</div>
+                        <div class="stat-label">Fotos Capturadas</div>
+                    </div>
+                    <div class="stat-box">
+                        <div class="stat-value" id="detectionRate">0%</div>
+                        <div class="stat-label">Taxa de Detecção</div>
+                    </div>
+                </div>
+
+                <div class="quality-bar">
+                    <div class="quality-label">
+                        <span>Qualidade da Imagem</span>
+                        <span id="qualityValue">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="qualityFill" style="width: 0%">0%</div>
+                    </div>
+                </div>
+
+                <div class="instructions">
+                    <h3>📋 Instruções:</h3>
+                    <ul>
+                        <li>Imprima o padrão em tamanho A4</li>
+                        <li>Cole em superfície plana e rígida</li>
+                        <li>Capture 15-20 fotos de diferentes ângulos</li>
+                        <li>Mantenha o padrão totalmente visível</li>
+                        <li>Evite reflexos e distorções</li>
+                    </ul>
+                </div>
+
+                <div class="alert" id="alertBox"></div>
+
+                <div class="button-group">
+                    <button class="btn-capture" id="btnCapture">
+                        📸 Capturar Frame
+                    </button>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-calibrate" id="btnCalibrate" disabled>
+                        🎯 Calibrar (min. 10 fotos)
+                    </button>
+                    <button class="btn-reset" id="btnReset">
+                        🔄 Resetar
+                    </button>
+                </div>
+
+                <div class="results" id="resultsBox" style="display: none;">
+                    <h3>📊 Resultados da Calibração</h3>
+                    <div id="resultsContent"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-top: 20px;">
+            <h2>💾 Calibrações Salvas</h2>
+            <div id="savedCalibrationsBox">
+                <p style="color: #999; text-align: center;">Carregando...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let capturedCount = 0;
+        let detectedFrames = 0;
+        let totalFrames = 0;
+        let currentQuality = 0;
+
+        function showAlert(message, type) {
+            const alertBox = document.getElementById('alertBox');
+            alertBox.textContent = message;
+            alertBox.className = `alert ${type}`;
+            alertBox.style.display = 'block';
+            
+            setTimeout(() => {
+                alertBox.style.display = 'none';
+            }, 4000);
+        }
+
+        function updateStats() {
+            document.getElementById('capturedCount').textContent = capturedCount;
+            
+            const rate = totalFrames > 0 ? Math.round((detectedFrames / totalFrames) * 100) : 0;
+            document.getElementById('detectionRate').textContent = rate + '%';
+
+            const btnCalibrate = document.getElementById('btnCalibrate');
+            if (capturedCount >= 10) {
+                btnCalibrate.disabled = false;
+                btnCalibrate.textContent = `🎯 Calibrar (${capturedCount} fotos)`;
+            } else {
+                btnCalibrate.disabled = true;
+                btnCalibrate.textContent = `🎯 Calibrar (min. 10 fotos)`;
+            }
+        }
+
+        function updateQuality(quality) {
+            currentQuality = quality;
+            const qualityFill = document.getElementById('qualityFill');
+            const qualityValue = document.getElementById('qualityValue');
+            
+            qualityFill.style.width = quality + '%';
+            qualityFill.textContent = quality + '%';
+            qualityValue.textContent = quality + '%';
+
+            qualityFill.className = 'progress-fill';
+            if (quality < 40) {
+                qualityFill.classList.add('low');
+            } else if (quality < 70) {
+                qualityFill.classList.add('medium');
+            }
+        }
+
+        function updateStatus(detected) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            
+            if (detected) {
+                indicator.className = 'status-indicator detecting';
+                statusText.textContent = 'Padrão detectado!';
+                detectedFrames++;
+            } else {
+                indicator.className = 'status-indicator waiting';
+                statusText.textContent = 'Aguardando padrão...';
+            }
+            totalFrames++;
+            updateStats();
+        }
+
+        document.getElementById('btnCapture').addEventListener('click', async () => {
+            const btn = document.getElementById('btnCapture');
+            const patternType = document.getElementById('patternType').value;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Capturando...';
+
+            try {
+                const response = await fetch('/api/calibracao_capturar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pattern_type: patternType })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    capturedCount++;
+                    updateStats();
+                    updateQuality(data.quality || 0);
+                    showAlert(`✓ Frame capturado! Qualidade: ${data.quality}%`, 'success');
+                } else {
+                    showAlert('✗ ' + data.error, 'error');
+                }
+            } catch (error) {
+                showAlert('✗ Erro ao capturar: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '📸 Capturar Frame';
+            }
+        });
+
+        document.getElementById('btnCalibrate').addEventListener('click', async () => {
+            const btn = document.getElementById('btnCalibrate');
+            const patternType = document.getElementById('patternType').value;
+            
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading"></span> Calibrando...';
+            showAlert('⏳ Processando calibração...', 'info');
+
+            try {
+                const response = await fetch('/api/calibracao_executar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pattern_type: patternType })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    const resultsBox = document.getElementById('resultsBox');
+                    const resultsContent = document.getElementById('resultsContent');
+                    
+                    resultsContent.innerHTML = `
+                        <div class="result-item"><strong>Erro de Reprojeção:</strong> ${data.reprojection_error.toFixed(4)} px</div>
+                        <div class="result-item"><strong>Focal X:</strong> ${data.focal_x.toFixed(2)} px</div>
+                        <div class="result-item"><strong>Focal Y:</strong> ${data.focal_y.toFixed(2)} px</div>
+                        <div class="result-item"><strong>Centro Óptico:</strong> (${data.center_x.toFixed(1)}, ${data.center_y.toFixed(1)})</div>
+                        <div class="result-item"><strong>Arquivo Salvo:</strong> ${data.calibration_file}</div>
+                    `;
+                    
+                    resultsBox.style.display = 'block';
+                    showAlert('✓ Calibração concluída com sucesso!', 'success');
+                    
+                    // Recarrega lista de calibrações salvas
+                    setTimeout(() => loadSavedCalibrations(), 1000);
+                } else {
+                    showAlert('✗ ' + data.error, 'error');
+                }
+            } catch (error) {
+                showAlert('✗ Erro na calibração: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = `🎯 Calibrar (${capturedCount} fotos)`;
+            }
+        });
+
+        document.getElementById('btnReset').addEventListener('click', async () => {
+            if (!confirm('Deseja resetar todas as fotos capturadas?')) return;
+
+            try {
+                const response = await fetch('/api/calibracao_resetar', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    capturedCount = 0;
+                    detectedFrames = 0;
+                    totalFrames = 0;
+                    currentQuality = 0;
+                    updateStats();
+                    updateQuality(0);
+                    document.getElementById('resultsBox').style.display = 'none';
+                    showAlert('✓ Dados resetados!', 'success');
+                }
+            } catch (error) {
+                showAlert('✗ Erro ao resetar: ' + error.message, 'error');
+            }
+        });
+
+        async function loadSavedCalibrations() {
+            try {
+                const response = await fetch('/api/calibracao_listar');
+                const data = await response.json();
+                
+                const box = document.getElementById('savedCalibrationsBox');
+                
+                if (!data.calibrations || data.calibrations.length === 0) {
+                    box.innerHTML = '<p style="color: #999; text-align: center;">Nenhuma calibração salva ainda</p>';
+                    return;
+                }
+                
+                let html = '<div class="calibration-list">';
+                data.calibrations.forEach(cal => {
+                    const date = new Date(cal.timestamp * 1000).toLocaleString('pt-BR');
+                    html += `
+                        <div class="calibration-item">
+                            <h4>📐 ${cal.pattern_type === 'chessboard' ? 'Xadrez 9×6' : 'ArUco Markers'}</h4>
+                            <div class="meta">
+                                <div><strong>Erro:</strong> ${cal.reprojection_error.toFixed(4)} px</div>
+                                <div><strong>Fotos:</strong> ${cal.num_images}</div>
+                                <div><strong>Focal X:</strong> ${cal.focal_x.toFixed(1)} px</div>
+                                <div><strong>Focal Y:</strong> ${cal.focal_y.toFixed(1)} px</div>
+                                <div><strong>Centro:</strong> (${cal.center_x.toFixed(0)}, ${cal.center_y.toFixed(0)})</div>
+                                <div><strong>Data:</strong> ${date}</div>
+                            </div>
+                            <button onclick="deleteCalibration('${cal.filename}')">🗑️ Deletar</button>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                box.innerHTML = html;
+                
+            } catch (error) {
+                console.error('Erro ao carregar calibrações:', error);
+                document.getElementById('savedCalibrationsBox').innerHTML = 
+                    '<p style="color: #f44336; text-align: center;">Erro ao carregar calibrações</p>';
+            }
+        }
+
+        async function deleteCalibration(filename) {
+            if (!confirm('Deseja deletar esta calibração?')) return;
+            
+            try {
+                const response = await fetch('/api/calibracao_deletar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: filename })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    showAlert('✓ Calibração deletada!', 'success');
+                    loadSavedCalibrations();
+                } else {
+                    showAlert('✗ Erro ao deletar', 'error');
+                }
+            } catch (error) {
+                showAlert('✗ Erro: ' + error.message, 'error');
+            }
+        }
+
+        // Carrega calibrações ao iniciar
+        loadSavedCalibrations();
+
+        setInterval(async () => {
+            try {
+                const response = await fetch('/api/calibracao_status');
+                const data = await response.json();
+                
+                updateStatus(data.pattern_detected);
+                if (data.quality) {
+                    updateQuality(data.quality);
+                }
+            } catch (error) {
+                console.error('Erro ao obter status:', error);
+            }
+        }, 500);
+    </script>
+</body>
+</html>

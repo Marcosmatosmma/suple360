@@ -110,6 +110,15 @@
                 <button class="btn-secondary" @click="testLidar">
                     📡 Testar LIDAR
                 </button>
+                <button class="btn-secondary" @click="openMap">
+                    🗺️ Mapa 2D
+                </button>
+                <button class="btn-secondary" @click="openCalibration">
+                    📐 Gerar Padrões
+                </button>
+                <button class="btn-secondary" @click="openCalibrationLive">
+                    🎯 Calibração Live
+                </button>
                 <button class="btn-danger" @click="clearHistory">
                     🗑️ Limpar Histórico
                 </button>
@@ -267,6 +276,18 @@
                 },
                 openLidarNewTab() {
                     const url = window.location.origin + '/lidar';
+                    window.open(url, '_blank');
+                },
+                openMap() {
+                    const url = window.location.origin + '/map';
+                    window.open(url, '_blank');
+                },
+                openCalibration() {
+                    const url = window.location.origin + '/calibracao';
+                    window.open(url, '_blank');
+                },
+                openCalibrationLive() {
+                    const url = window.location.origin + '/calibracao_live';
                     window.open(url, '_blank');
                 },
                 updateLidar() {
