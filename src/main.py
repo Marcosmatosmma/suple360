@@ -7,6 +7,7 @@ from database import DatabaseManager
 from lidar_manager import LidarManager
 from camera import CameraManager
 from detector import Detector
+from mapper import MapBuilder
 from api import create_app
 
 
@@ -29,6 +30,10 @@ def main():
         lidar_manager.start()
         print("✓ LIDAR inicializado")
         
+        # Inicializa mapper (Fase 2)
+        mapper = MapBuilder(size_m=20, resolution_px=800)
+        print("✓ Mapper 2D inicializado (20x20 metros)")
+        
         model = YOLO('/home/suple/Desktop/suple360v2/model/best.pt')
         print("✓ Modelo YOLO carregado")
         
@@ -48,12 +53,13 @@ def main():
             lidar_manager=lidar_manager,
             camera_manager=camera_manager,
             screenshot_dir=screenshot_dir,
+            mapper=mapper,  # Passa mapper para detector
             cam_hfov_deg=70.0
         )
         detector.start()
-        print("✓ Detector iniciado")
+        print("✓ Detector iniciado (com mapeamento 2D)")
         
-        app = create_app(db_manager, camera_manager, lidar_manager)
+        app = create_app(db_manager, camera_manager, lidar_manager, mapper)
         
         def run_flask():
             app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
@@ -65,6 +71,7 @@ def main():
         print("\n" + "="*50)
         print("Sistema iniciado com sucesso!")
         print("Acesse: http://localhost:5000")
+        print("Mapa 2D: http://localhost:5000/map")
         print("="*50 + "\n")
         
         while True:
