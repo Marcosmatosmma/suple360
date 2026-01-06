@@ -55,6 +55,12 @@ class DatabaseManager:
                 profundidade_score REAL,
                 profundidade_cm REAL,
                 classificacao_profundidade TEXT,
+                entropia REAL,
+                energia_glcm REAL,
+                homogeneidade_glcm REAL,
+                densidade_bordas REAL,
+                tipo_dano TEXT,
+                tipo_dano_confianca REAL,
                 severidade TEXT,
                 prioridade TEXT,
                 FOREIGN KEY (detection_id) REFERENCES detections(id)
@@ -100,7 +106,9 @@ class DatabaseManager:
                     dims = analysis.get('dimensoes_reais', {})
                     geom = analysis.get('geometria', {})
                     tex = analysis.get('textura', {})
+                    tex_avanc = analysis.get('textura_avancada', {})
                     prof = analysis.get('profundidade', {})
+                    tipo_dano_info = analysis.get('tipo_dano', {})
                     classif = analysis.get('classificacao', {})
                     
                     cursor.execute('''
@@ -111,8 +119,10 @@ class DatabaseManager:
                          intensidade_media, desvio_padrao, contraste,
                          gradiente_medio, intensidade_sombra, variacao_intensidade,
                          profundidade_score, profundidade_cm, classificacao_profundidade,
+                         entropia, energia_glcm, homogeneidade_glcm, densidade_bordas,
+                         tipo_dano, tipo_dano_confianca,
                          severidade, prioridade)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         detection_id, 
                         track_id,
@@ -136,6 +146,12 @@ class DatabaseManager:
                         prof.get('profundidade_score'),
                         prof.get('profundidade_cm'),
                         prof.get('classificacao'),
+                        tex_avanc.get('entropia'),
+                        tex_avanc.get('energia'),
+                        tex_avanc.get('homogeneidade'),
+                        tex_avanc.get('densidade_bordas'),
+                        tipo_dano_info.get('tipo_dano'),
+                        tipo_dano_info.get('confianca'),
                         classif.get('severidade'),
                         classif.get('prioridade')
                     ))

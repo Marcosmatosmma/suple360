@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 from depth_estimator import DepthEstimator
+from texture_analyzer import TextureAnalyzer
+from damage_classifier import DamageClassifier
 
 
 class OpenCVAnalyzer:
@@ -16,6 +18,8 @@ class OpenCVAnalyzer:
     def __init__(self):
         """Inicializa o analisador OpenCV."""
         self.depth_estimator = DepthEstimator()
+        self.texture_analyzer = TextureAnalyzer()
+        self.damage_classifier = DamageClassifier()
     
     def analisar_buraco(self, frame, bbox, distancia_m=None):
         """
@@ -54,6 +58,9 @@ class OpenCVAnalyzer:
         # Análise de textura
         textura = self._analisar_textura(gray)
         
+        # Análise de textura avançada (Fase 4)
+        textura_avancada = self.texture_analyzer.analisar_textura_avancada(roi, contorno)
+        
         # Análise de profundidade (Fase 3)
         profundidade = self.depth_estimator.estimar_profundidade(
             roi, distancia_m if distancia_m else 2.0, contorno
@@ -66,6 +73,16 @@ class OpenCVAnalyzer:
         
         # Classificação de severidade
         severidade = self._classificar_severidade(dimensoes_reais, geometria)
+        
+        # Classificação de tipo de dano (Fase 4)
+        tipo_dano = self.damage_classifier.classificar_dano(
+            roi, contorno, 
+            {'circularidade': geometria['circularidade'],
+             'aspect_ratio': geometria['aspect_ratio'],
+             'convexidade': geometria['convexidade']},
+            textura_avancada,
+            dimensoes_reais
+        )
         
         return {
             'dimensoes_pixels': {
@@ -84,7 +101,9 @@ class OpenCVAnalyzer:
                 'elipse_eixo_menor': geometria['elipse_eixo_menor']
             },
             'textura': textura,
+            'textura_avancada': textura_avancada,
             'profundidade': profundidade,
+            'tipo_dano': tipo_dano,
             'classificacao': severidade
         }
     
@@ -329,6 +348,19 @@ class OpenCVAnalyzer:
                 'desvio_padrao': 0,
                 'contraste': 0
             },
+            'textura_avancada': {
+                'entropia': 0.0,
+                'energia': 0.0,
+                'homogeneidade': 0.0,
+                'contraste_glcm': 0.0,
+                'correlacao': 0.0,
+                'densidade_bordas': 0.0,
+                'freq_dominante': 0.0,
+                'rugosidade': 0.0,
+                'histograma_rgb': {'r_mean': 0, 'g_mean': 0, 'b_mean': 0, 'r_std': 0, 'g_std': 0, 'b_std': 0},
+                'histograma_hsv': {'h_mean': 0, 's_mean': 0, 'v_mean': 0},
+                'textura_dominante': 'desconhecida'
+            },
             'profundidade': {
                 'gradiente_medio': 0.0,
                 'intensidade_sombra': 0.0,
@@ -336,6 +368,13 @@ class OpenCVAnalyzer:
                 'profundidade_score': 0.0,
                 'profundidade_cm': 0.0,
                 'classificacao': 'raso'
+            },
+            'tipo_dano': {
+                'tipo_dano': 'desconhecido',
+                'confianca': 0.0,
+                'tipo_secundario': None,
+                'scores_detalhados': {},
+                'caracteristicas': ''
             },
             'classificacao': {
                 'severidade': 'desconhecida',
