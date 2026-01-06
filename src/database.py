@@ -49,6 +49,12 @@ class DatabaseManager:
                 intensidade_media REAL,
                 desvio_padrao REAL,
                 contraste REAL,
+                gradiente_medio REAL,
+                intensidade_sombra REAL,
+                variacao_intensidade REAL,
+                profundidade_score REAL,
+                profundidade_cm REAL,
+                classificacao_profundidade TEXT,
                 severidade TEXT,
                 prioridade TEXT,
                 FOREIGN KEY (detection_id) REFERENCES detections(id)
@@ -94,6 +100,7 @@ class DatabaseManager:
                     dims = analysis.get('dimensoes_reais', {})
                     geom = analysis.get('geometria', {})
                     tex = analysis.get('textura', {})
+                    prof = analysis.get('profundidade', {})
                     classif = analysis.get('classificacao', {})
                     
                     cursor.execute('''
@@ -101,8 +108,11 @@ class DatabaseManager:
                         (detection_id, track_id, bbox_x1, bbox_y1, bbox_x2, bbox_y2, 
                          confianca, distancia_m, largura_m, altura_m, area_m2, perimetro_m,
                          aspect_ratio, circularidade, convexidade, orientacao_deg,
-                         intensidade_media, desvio_padrao, contraste, severidade, prioridade)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         intensidade_media, desvio_padrao, contraste,
+                         gradiente_medio, intensidade_sombra, variacao_intensidade,
+                         profundidade_score, profundidade_cm, classificacao_profundidade,
+                         severidade, prioridade)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ''', (
                         detection_id, 
                         track_id,
@@ -120,6 +130,12 @@ class DatabaseManager:
                         tex.get('intensidade_media'),
                         tex.get('desvio_padrao'),
                         tex.get('contraste'),
+                        prof.get('gradiente_medio'),
+                        prof.get('intensidade_sombra'),
+                        prof.get('variacao_intensidade'),
+                        prof.get('profundidade_score'),
+                        prof.get('profundidade_cm'),
+                        prof.get('classificacao'),
                         classif.get('severidade'),
                         classif.get('prioridade')
                     ))

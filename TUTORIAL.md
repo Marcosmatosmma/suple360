@@ -39,7 +39,11 @@ src/
 ├── api.py             # 🌐 Rotas da API Flask
 ├── utils.py           # 🛠️ Funções auxiliares
 ├── opencv_analyzer.py # 🎨 Análise geométrica com OpenCV (FASE 1)
-└── tracker.py         # 🎯 Rastreamento de buracos (FASE 1)
+├── tracker.py         # 🎯 Rastreamento de buracos (FASE 1)
+├── mapper.py          # 🗺️ Construtor de mapas 2D (FASE 2)
+├── map_utils.py       # 🧭 Conversões de coordenadas (FASE 2)
+├── calibration.py     # 📐 Calibração de câmera (FASE 3)
+└── depth_estimator.py # 🔬 Estimativa de profundidade (FASE 3)
 ```
 
 ---
@@ -1168,5 +1172,154 @@ Ver arquivo **FASE2_RESUMO.md** para documentação completa.
 ---
 
 **Versão:** 2.2 (Fase 2 - Mapeamento 2D)  
+**Última Atualização:** 06/Janeiro/2026
+
+---
+
+## 🔬 Fase 3: Calibração e Profundidade
+
+### Módulos Adicionados:
+- **calibration.py** - Calibração de câmera com padrão xadrez
+- **depth_estimator.py** - Estimativa de profundidade monocular
+- Atualizado **opencv_analyzer.py** - Integração com profundidade
+- Atualizado **database.py** - 6 novos campos de profundidade
+
+### Funcionalidades:
+✅ Calibração precisa da câmera (matriz intrínseca, distorção)  
+✅ Estimativa de profundidade usando Shape from Shading  
+✅ Análise de gradientes, sombras e intensidade  
+✅ Classificação: raso (<3cm), médio (3-8cm), profundo (>8cm)  
+✅ Novos campos no banco: gradiente, sombra, score, profundidade  
+✅ Scripts de calibração e teste  
+
+### Como Calibrar a Câmera:
+
+**1. Prepare o padrão xadrez:**
+```bash
+# Imprima um padrão xadrez 9x6 (disponível online)
+# Cada quadrado deve ter 2.5cm x 2.5cm
+```
+
+**2. Tire fotos do padrão:**
+```bash
+# Crie pasta para imagens de calibração
+mkdir calibracao
+
+# Tire 15-20 fotos do padrão em diferentes ângulos
+# Certifique-se que o padrão está completamente visível
+```
+
+**3. Execute calibração:**
+```bash
+python3 calibrate_camera.py --images calibracao/*.jpg
+```
+
+**4. Resultado:**
+```
+✅ Calibração concluída!
+💾 Arquivo salvo: camera_calibration.pkl
+📊 Erro de reprojeção: 0.31 pixels
+```
+
+### Como Funciona a Estimativa de Profundidade:
+
+**1. Análise de Gradientes (40% do score):**
+- Calcula variação de intensidade usando Sobel
+- Buracos profundos têm bordas mais acentuadas
+- Gradiente médio > 35 = profundo
+
+**2. Análise de Sombras (30% do score):**
+- Mede porcentagem de pixels escuros
+- Buracos profundos acumulam sombra interna
+- Usa threshold adaptativo (Otsu)
+
+**3. Variação de Intensidade (30% do score):**
+- Compara brilho da borda vs centro
+- Centro mais escuro indica maior profundidade
+- Diferença > 50 = profundo
+
+**4. Estimativa em Centímetros:**
+```python
+# Score 0-100 → 0.5cm a 10cm
+# Ajustado pela distância do LIDAR
+profundidade_cm = 0.5 + (score/100) * 9.5
+```
+
+### Novos Campos no Banco de Dados:
+
+```sql
+-- 6 novos campos na tabela buracos:
+gradiente_medio REAL,           -- Intensidade do gradiente (0-255)
+intensidade_sombra REAL,        -- % de pixels escuros (0-100)
+variacao_intensidade REAL,      -- Diferença borda-centro (0-255)
+profundidade_score REAL,        -- Score combinado (0-100)
+profundidade_cm REAL,           -- Profundidade estimada em cm
+classificacao_profundidade TEXT -- 'raso', 'medio', 'profundo'
+```
+
+### Consultar Dados de Profundidade:
+
+```python
+import sqlite3
+
+conn = sqlite3.connect('deteccoes/detections.db')
+cursor = conn.cursor()
+
+# Busca buracos profundos
+cursor.execute('''
+    SELECT 
+        area_m2, 
+        profundidade_cm, 
+        classificacao_profundidade,
+        severidade
+    FROM buracos
+    WHERE classificacao_profundidade = 'profundo'
+    ORDER BY profundidade_cm DESC
+''')
+
+for row in cursor.fetchall():
+    area, prof, classif, sev = row
+    print(f"Buraco {sev}: {area:.4f}m² - {prof:.2f}cm ({classif})")
+```
+
+### Scripts Auxiliares:
+
+**1. calibrate_camera.py:**
+```bash
+# Calibra câmera e salva parâmetros
+python3 calibrate_camera.py --images calibracao/*.jpg
+```
+
+**2. test_fase3.py:**
+```bash
+# Testa todos os componentes da Fase 3
+python3 test_fase3.py
+```
+
+### Exemplo de Resultado:
+
+```
+📊 Buraco detectado:
+   Área: 0.0823 m²
+   Dimensões: 0.35m x 0.28m
+   
+   🔬 Profundidade:
+      Gradiente: 42.15
+      Sombra: 68.5%
+      Variação: 51.2
+      Score: 73.8/100
+      Profundidade: 7.5 cm
+      Classificação: médio
+   
+   ⚠️ Severidade: media
+   📍 Prioridade: media
+```
+
+### Para mais detalhes:
+Ver arquivo **FASE3_RESUMO.md** para documentação completa.
+
+---
+
+**Versão:** 2.3 (Fase 3 - Calibração + Profundidade)  
 **Última Atualização:** 06/Janeiro/2026
 
