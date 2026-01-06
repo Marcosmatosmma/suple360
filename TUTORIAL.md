@@ -43,7 +43,9 @@ src/
 ├── mapper.py          # 🗺️ Construtor de mapas 2D (FASE 2)
 ├── map_utils.py       # 🧭 Conversões de coordenadas (FASE 2)
 ├── calibration.py     # 📐 Calibração de câmera (FASE 3)
-└── depth_estimator.py # 🔬 Estimativa de profundidade (FASE 3)
+├── depth_estimator.py # 🔬 Estimativa de profundidade (FASE 3)
+├── texture_analyzer.py  # 🎨 Análise avançada de textura (FASE 4)
+└── damage_classifier.py # 🔍 Classificação de tipo de dano (FASE 4)
 ```
 
 ---
@@ -1321,5 +1323,203 @@ Ver arquivo **FASE3_RESUMO.md** para documentação completa.
 ---
 
 **Versão:** 2.3 (Fase 3 - Calibração + Profundidade)  
+**Última Atualização:** 06/Janeiro/2026
+
+---
+
+## 🎨 Fase 4: Análise Avançada de Textura
+
+### Módulos Adicionados:
+- **texture_analyzer.py** - Análise GLCM, entropia, FFT (499 linhas)
+- **damage_classifier.py** - Classificação de tipo de dano (320 linhas)
+- Atualizado **opencv_analyzer.py** - Integração completa
+- Atualizado **database.py** - 6 novos campos de textura
+
+### Funcionalidades:
+✅ Análise GLCM (Gray-Level Co-occurrence Matrix)  
+✅ Entropia de Shannon (medida de desordem)  
+✅ Análise de frequências (FFT 2D)  
+✅ Histogramas RGB e HSV  
+✅ Densidade de bordas (Canny)  
+✅ Classificação de textura: lisa, rugosa, irregular, complexa  
+✅ Classificação de dano: buraco circular/irregular, rachadura, erosão  
+
+### Análise GLCM:
+
+A **GLCM** analisa relação espacial entre pixels vizinhos:
+
+```python
+# 4 métricas principais:
+- Energia: Uniformidade da textura (0-1)
+- Homogeneidade: Suavidade da textura (0-1)
+- Contraste: Variação local (0-∞)
+- Correlação: Dependência linear (-1 a 1)
+```
+
+**Exemplo de uso:**
+```python
+from src.texture_analyzer import TextureAnalyzer
+
+analyzer = TextureAnalyzer()
+resultado = analyzer.analisar_textura_avancada(roi, contorno)
+
+print(f"Entropia: {resultado['entropia']:.3f}")          # 0-8
+print(f"Energia: {resultado['energia']:.3f}")            # 0-1
+print(f"Homogeneidade: {resultado['homogeneidade']:.3f}")# 0-1
+print(f"Textura: {resultado['textura_dominante']}")      # lisa/rugosa/irregular/complexa
+```
+
+### Classificação de Tipo de Dano:
+
+O sistema detecta 4 tipos de danos:
+
+| Tipo | Critérios | Características |
+|------|-----------|-----------------|
+| **Buraco Circular** | Circularidade > 0.65, Convexidade > 0.80 | Compacto, forma regular |
+| **Buraco Irregular** | Circularidade < 0.60, Entropia alta | Bordas complexas, irregular |
+| **Rachadura** | Aspect ratio > 3.0, Skeleton alongado | Linear, fino, alongado |
+| **Erosão** | Área < 0.08 m², Bordas difusas | Superficial, disperso |
+
+**Exemplo de uso:**
+```python
+from src.damage_classifier import DamageClassifier
+
+classifier = DamageClassifier()
+resultado = classifier.classificar_dano(roi, contorno, geometria, textura, dimensoes)
+
+print(f"Tipo: {resultado['tipo_dano']}")                    # buraco_circular
+print(f"Confiança: {resultado['confianca']:.1f}%")          # 85.3%
+print(f"Descrição: {resultado['caracteristicas']}")         # "Buraco compacto..."
+```
+
+### Métricas de Textura:
+
+**1. Entropia de Shannon:**
+```python
+# Mede complexidade/desordem da textura
+Entropia = -Σ(p * log2(p))
+
+- Baixa (< 4.0): Textura uniforme, lisa
+- Média (4.0-6.0): Textura rugosa
+- Alta (> 6.0): Textura irregular, complexa
+```
+
+**2. Análise de Frequências (FFT):**
+```python
+# Detecta padrões repetitivos
+- Alta frequência dominante: Textura detalhada/rugosa
+- Baixa frequência: Textura lisa/uniforme
+- Rugosidade: % de energia em altas frequências
+```
+
+**3. Densidade de Bordas:**
+```python
+# Porcentagem de pixels de borda (Canny)
+- < 10%: Textura lisa
+- 10-30%: Textura rugosa
+- > 30%: Textura irregular
+```
+
+### Novos Campos no Banco de Dados:
+
+```sql
+-- 6 novos campos na tabela buracos:
+entropia REAL,                -- Entropia de Shannon (0-8)
+energia_glcm REAL,            -- Uniformidade GLCM (0-1)
+homogeneidade_glcm REAL,      -- Suavidade GLCM (0-1)
+densidade_bordas REAL,        -- % de bordas (0-100)
+tipo_dano TEXT,               -- Tipo classificado
+tipo_dano_confianca REAL      -- Confiança da classificação (0-100)
+```
+
+### Consultar Dados por Tipo de Dano:
+
+```python
+import sqlite3
+
+conn = sqlite3.connect('deteccoes/detections.db')
+cursor = conn.cursor()
+
+# Busca rachaduras detectadas
+cursor.execute('''
+    SELECT 
+        area_m2,
+        aspect_ratio,
+        tipo_dano,
+        tipo_dano_confianca,
+        severidade
+    FROM buracos
+    WHERE tipo_dano = 'rachadura'
+    ORDER BY tipo_dano_confianca DESC
+''')
+
+for row in cursor.fetchall():
+    area, asp, tipo, conf, sev = row
+    print(f"Rachadura {sev}: {area:.4f}m² (asp={asp:.2f}) - {conf:.1f}% confiança")
+```
+
+### Exemplo de Resultado Completo:
+
+```
+📊 Buraco detectado:
+   Dimensões: 0.35m x 0.28m (0.0823 m²)
+   
+   🎨 Textura Básica:
+      Intensidade: 87.3
+      Desvio padrão: 24.1
+      Contraste: 0.68
+   
+   🔬 Textura Avançada (Fase 4):
+      Entropia: 5.23
+      Energia: 0.31
+      Homogeneidade: 0.58
+      Contraste GLCM: 142.5
+      Densidade bordas: 28.3%
+      Textura dominante: rugosa
+   
+   🔍 Tipo de Dano (Fase 4):
+      Tipo: buraco_irregular
+      Confiança: 78.5%
+      Tipo secundário: None
+      Descrição: Buraco irregular (circ=0.42), bordas complexas
+   
+   🔬 Profundidade:
+      Profundidade: 7.5 cm
+      Classificação: médio
+   
+   ⚠️ Severidade: media
+   📍 Prioridade: media
+```
+
+### Scripts de Teste:
+
+```bash
+# Testa análise de textura avançada
+python3 test_fase4.py
+```
+
+**Saída esperada:**
+```
+✅ TESTE 1: Análise de Textura Avançada
+   Entropia: 0.926
+   Homogeneidade: 0.966
+   Textura dominante: lisa
+
+✅ TESTE 2: Classificação de Tipo de Dano
+   CIRCULAR: buraco_circular (100.0%)
+   IRREGULAR: buraco_irregular (80.0%)
+   RACHADURA: rachadura (90.0%)
+   EROSAO: erosao (70.0%)
+
+✅ TESTE 3: Integração Completa
+   Todos os módulos funcionando ✓
+```
+
+### Para mais detalhes:
+Ver arquivo **FASE4_RESUMO.md** para documentação completa.
+
+---
+
+**Versão:** 2.4 (Fase 4 - Análise Avançada de Textura)  
 **Última Atualização:** 06/Janeiro/2026
 
