@@ -31,6 +31,7 @@ class DatabaseManager:
             CREATE TABLE IF NOT EXISTS buracos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 detection_id INTEGER NOT NULL,
+                track_id INTEGER,
                 bbox_x1 INTEGER,
                 bbox_y1 INTEGER,
                 bbox_x2 INTEGER,
@@ -38,6 +39,18 @@ class DatabaseManager:
                 confianca REAL,
                 distancia_m REAL,
                 largura_m REAL,
+                altura_m REAL,
+                area_m2 REAL,
+                perimetro_m REAL,
+                aspect_ratio REAL,
+                circularidade REAL,
+                convexidade REAL,
+                orientacao_deg REAL,
+                intensidade_media REAL,
+                desvio_padrao REAL,
+                contraste REAL,
+                severidade TEXT,
+                prioridade TEXT,
                 FOREIGN KEY (detection_id) REFERENCES detections(id)
             )
         ''')
@@ -45,8 +58,16 @@ class DatabaseManager:
         conn.commit()
         conn.close()
     
-    def add_detection(self, photo_path, boxes, timestamp):
-        """Adiciona detecção e seus buracos ao banco"""
+    def add_detection(self, photo_path, boxes, timestamp, analysis_data=None):
+        """
+        Adiciona detecção e seus buracos ao banco.
+        
+        Args:
+            photo_path: Nome do arquivo da foto
+            boxes: Lista de boxes detectados
+            timestamp: Data/hora da detecção
+            analysis_data: Lista de dicionários com análises OpenCV (opcional)
+        """
         with self.lock:
             try:
                 conn = sqlite3.connect(self.db_path)
@@ -58,19 +79,50 @@ class DatabaseManager:
                 )
                 detection_id = cursor.lastrowid
                 
-                for box in boxes:
+                for idx, box in enumerate(boxes):
                     if len(box) == 7:
                         x1, y1, x2, y2, conf, dist_m, width_m = box
                     else:
                         x1, y1, x2, y2, conf = box[:5]
                         dist_m, width_m = None, None
                     
+                    # Dados da análise OpenCV (se disponível)
+                    analysis = analysis_data[idx] if analysis_data and idx < len(analysis_data) else {}
+                    track_id = analysis.get('track_id')
+                    
+                    # Extrai dados de análise
+                    dims = analysis.get('dimensoes_reais', {})
+                    geom = analysis.get('geometria', {})
+                    tex = analysis.get('textura', {})
+                    classif = analysis.get('classificacao', {})
+                    
                     cursor.execute('''
                         INSERT INTO buracos 
-                        (detection_id, bbox_x1, bbox_y1, bbox_x2, bbox_y2, confianca, distancia_m, largura_m)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (detection_id, int(x1), int(y1), int(x2), int(y2), float(conf), 
-                          float(dist_m) if dist_m else None, float(width_m) if width_m else None))
+                        (detection_id, track_id, bbox_x1, bbox_y1, bbox_x2, bbox_y2, 
+                         confianca, distancia_m, largura_m, altura_m, area_m2, perimetro_m,
+                         aspect_ratio, circularidade, convexidade, orientacao_deg,
+                         intensidade_media, desvio_padrao, contraste, severidade, prioridade)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        detection_id, 
+                        track_id,
+                        int(x1), int(y1), int(x2), int(y2),
+                        float(conf),
+                        float(dist_m) if dist_m else None,
+                        dims.get('largura_m'),
+                        dims.get('altura_m'),
+                        dims.get('area_m2'),
+                        dims.get('perimetro_m'),
+                        geom.get('aspect_ratio'),
+                        geom.get('circularidade'),
+                        geom.get('convexidade'),
+                        geom.get('orientacao_deg'),
+                        tex.get('intensidade_media'),
+                        tex.get('desvio_padrao'),
+                        tex.get('contraste'),
+                        classif.get('severidade'),
+                        classif.get('prioridade')
+                    ))
                 
                 conn.commit()
                 conn.close()

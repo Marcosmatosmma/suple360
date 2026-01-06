@@ -31,13 +31,15 @@ Este sistema detecta buracos em tempo real usando:
 
 ```
 src/
-├── main.py           # 🚀 Arquivo principal - inicia tudo
-├── database.py       # 💾 Gerencia o banco de dados SQLite
-├── camera.py         # 📷 Captura frames da câmera
-├── detector.py       # 🔍 Detecta buracos com YOLO
-├── lidar_manager.py  # 📡 Lê dados do sensor LIDAR
-├── api.py            # 🌐 Rotas da API Flask
-└── utils.py          # 🛠️ Funções auxiliares
+├── main.py            # 🚀 Arquivo principal - inicia tudo
+├── database.py        # 💾 Gerencia o banco de dados SQLite
+├── camera.py          # 📷 Captura frames da câmera
+├── detector.py        # 🔍 Detecta buracos com YOLO
+├── lidar_manager.py   # 📡 Lê dados do sensor LIDAR
+├── api.py             # 🌐 Rotas da API Flask
+├── utils.py           # 🛠️ Funções auxiliares
+├── opencv_analyzer.py # 🎨 Análise geométrica com OpenCV (FASE 1)
+└── tracker.py         # 🎯 Rastreamento de buracos (FASE 1)
 ```
 
 ---
@@ -458,6 +460,294 @@ cv2.putText(frame, text, (10, 70), ...)
 
 ---
 
+### 8. `opencv_analyzer.py` - Análise Geométrica (FASE 1) 🆕
+
+**O que faz:** Analisa profundamente cada buraco usando técnicas avançadas de OpenCV.
+
+#### Classe `OpenCVAnalyzer`
+
+**Método Principal: `analisar_buraco(frame, bbox, distancia_m)`**
+
+**Entrada:**
+- `frame`: Imagem completa da câmera
+- `bbox`: Coordenadas do buraco `(x1, y1, x2, y2)`
+- `distancia_m`: Distância do LIDAR (opcional)
+
+**Saída:** Dicionário completo com:
+
+**1. Dimensões em Pixels**
+```python
+{
+    'largura_px': 203,      # Largura em pixels
+    'altura_px': 89,        # Altura em pixels
+    'area_px': 14250,       # Área total
+    'perimetro_px': 584     # Perímetro
+}
+```
+
+**2. Dimensões Reais (em metros)**
+```python
+{
+    'largura_m': 0.452,     # Largura real
+    'altura_m': 0.321,      # Altura real
+    'area_m2': 0.1145,      # Área em m²
+    'perimetro_m': 1.423    # Perímetro em metros
+}
+```
+
+**3. Geometria**
+```python
+{
+    'aspect_ratio': 1.18,         # Proporção largura/altura
+    'circularidade': 0.82,        # 0=irregular, 1=círculo perfeito
+    'convexidade': 0.91,          # 0=muito irregular, 1=convexo
+    'orientacao_deg': 23.4,       # Ângulo de rotação
+    'elipse_eixo_maior': 0.50,    # Eixo maior da elipse ajustada
+    'elipse_eixo_menor': 0.35     # Eixo menor
+}
+```
+
+**4. Textura**
+```python
+{
+    'intensidade_media': 87.3,    # Brilho médio (0-255)
+    'desvio_padrao': 24.1,        # Variação de brilho
+    'contraste': 0.68             # Contraste (0-1)
+}
+```
+
+**5. Classificação Automática**
+```python
+{
+    'severidade': 'media',         # leve / media / grave
+    'necessita_reparo': True,      # Precisa consertar?
+    'prioridade': 'media'          # baixa / media / alta
+}
+```
+
+#### Como Funciona Internamente?
+
+**Passo 1: Extração de Contorno**
+```python
+def _extrair_contorno(gray_image):
+    # Binarização adaptativa (se adapta à iluminação)
+    thresh = cv2.adaptiveThreshold(...)
+    
+    # Encontra contornos (bordas do buraco)
+    contours = cv2.findContours(thresh, ...)
+    
+    # Retorna o maior contorno
+    return max(contours, key=cv2.contourArea)
+```
+
+**Passo 2: Análise Geométrica**
+```python
+def _analisar_geometria(contorno):
+    # Área do contorno
+    area = cv2.contourArea(contorno)
+    
+    # Perímetro do contorno
+    perimetro = cv2.arcLength(contorno, True)
+    
+    # Circularidade: 4π × área / perímetro²
+    # Círculo perfeito = 1.0
+    circularidade = (4 * π * area) / (perimetro²)
+    
+    # Convex Hull (envoltória convexa)
+    hull = cv2.convexHull(contorno)
+    convexidade = area / area_hull
+    
+    # Elipse ajustada
+    ellipse = cv2.fitEllipse(contorno)
+    # Retorna orientação e eixos
+```
+
+**Passo 3: Conversão Pixel → Metro**
+```python
+def _converter_para_metros(geometria, distancia_m):
+    # Calcula largura real do campo de visão
+    largura_real_m = 2 × distancia × tan(FOV/2)
+    
+    # Fator de conversão
+    metros_por_pixel = largura_real_m / largura_px
+    
+    # Converte todas as medidas
+    area_m2 = area_px × (metros_por_pixel)²
+```
+
+**Passo 4: Classificação de Severidade**
+```python
+def _classificar_severidade(area_m2, circularidade):
+    if area_m2 < 0.05 and circularidade > 0.7:
+        return 'leve'  # Buraco pequeno e circular
+    elif area_m2 > 0.15 or circularidade < 0.4:
+        return 'grave'  # Grande ou muito irregular
+    else:
+        return 'media'
+```
+
+---
+
+### 9. `tracker.py` - Rastreamento de Buracos (FASE 1) 🆕
+
+**O que faz:** Rastreia buracos entre frames consecutivos para evitar salvar o mesmo buraco múltiplas vezes.
+
+#### Problema que Resolve:
+
+**Antes (sem tracker):**
+```
+Frame 1: Detecta buraco → Salva no banco (ID 1)
+Frame 2: Detecta MESMO buraco → Salva de novo (ID 2) ❌
+Frame 3: Detecta MESMO buraco → Salva de novo (ID 3) ❌
+...
+Resultado: 1 buraco = 30 registros! 😱
+```
+
+**Depois (com tracker):**
+```
+Frame 1: Detecta buraco → NOVO! Salva (Track ID 1) ✅
+Frame 2: Detecta buraco → MESMO! Não salva ✅
+Frame 3: Detecta buraco → MESMO! Não salva ✅
+...
+Resultado: 1 buraco = 1 registro! 🎉
+```
+
+#### Classe `BuracoTracker`
+
+**Variáveis de Instância:**
+```python
+self.tracked_buracos = []      # Lista de buracos rastreados
+self.iou_threshold = 0.3       # Limiar para considerar "mesmo buraco"
+self.max_age_seconds = 5.0     # Tempo para esquecer buraco antigo
+self.next_id = 1               # Próximo ID de track
+```
+
+**Método Principal: `update(detections)`**
+
+**Entrada:**
+```python
+detections = [
+    (x1, y1, x2, y2, conf, dist_m, width_m),
+    (x1, y1, x2, y2, conf, dist_m, width_m),
+    ...
+]
+```
+
+**Saída:**
+```python
+(novos_buracos, buracos_atualizados)
+
+novos_buracos = [
+    {'track_id': 1, 'detection': (...), 'is_new': True},
+    ...
+]
+
+buracos_atualizados = [
+    {'track_id': 2, 'detection': (...), 'is_new': False, 'count': 5},
+    ...
+]
+```
+
+#### Algoritmo de Matching (IoU)
+
+**IoU = Intersection over Union**
+
+```
+┌─────────┐
+│ Bbox 1  │
+│    ┌────┼────┐
+│    │ IoU│    │
+└────┼────┘    │
+     │ Bbox 2  │
+     └─────────┘
+
+IoU = Área de Interseção / Área de União
+```
+
+**Cálculo de IoU:**
+```python
+def _calculate_iou(bbox1, bbox2):
+    # Coordenadas da interseção
+    x1_i = max(x1_bbox1, x1_bbox2)
+    y1_i = max(y1_bbox1, y1_bbox2)
+    x2_i = min(x2_bbox1, x2_bbox2)
+    y2_i = min(y2_bbox1, y2_bbox2)
+    
+    # Área de interseção
+    if x2_i < x1_i or y2_i < y1_i:
+        intersection = 0
+    else:
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+    
+    # Área de união
+    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+    union = area1 + area2 - intersection
+    
+    return intersection / union
+```
+
+**Interpretação do IoU:**
+- `IoU = 0.0` → Boxes não se tocam
+- `IoU = 0.3` → Overlap pequeno (threshold padrão)
+- `IoU = 0.5` → Overlap médio
+- `IoU = 1.0` → Boxes idênticos
+
+#### Lógica de Tracking:
+
+```python
+for cada_nova_detecção:
+    melhor_match = None
+    melhor_iou = 0
+    
+    for cada_track_existente:
+        iou = calcular_iou(nova_detecção, track)
+        
+        if iou > threshold AND iou > melhor_iou:
+            melhor_match = track
+            melhor_iou = iou
+    
+    if melhor_match encontrado:
+        # É o MESMO buraco!
+        atualizar_track(melhor_match)
+        adicionar_em_buracos_atualizados()
+    else:
+        # É um NOVO buraco!
+        criar_novo_track()
+        adicionar_em_novos_buracos()
+```
+
+#### Suavização de Posição
+
+Quando um buraco é re-detectado, a posição é suavizada:
+
+```python
+def _smooth_bbox(old_bbox, new_bbox, alpha=0.7):
+    # Média ponderada
+    smoothed_x1 = 0.7 × new_x1 + 0.3 × old_x1
+    smoothed_y1 = 0.7 × new_y1 + 0.3 × old_y1
+    # ... (para todos os pontos)
+    
+    return smoothed_bbox
+```
+
+Isso evita "tremidas" na posição do box.
+
+#### Limpeza Automática
+
+Buracos que saem do campo de visão são removidos:
+
+```python
+def _remove_old_tracks(current_time):
+    # Remove tracks não vistos há mais de 5 segundos
+    self.tracked_buracos = [
+        track for track in self.tracked_buracos
+        if current_time - track['last_seen'] <= 5.0
+    ]
+```
+
+---
+
 ## 🔄 Fluxo de Execução
 
 ### Inicialização (main.py)
@@ -485,7 +775,7 @@ Loop infinito:
   6. Repete (~30 FPS)
 ```
 
-**Thread 2: Detecção YOLO** (detector.py)
+**Thread 2: Detecção YOLO + Análise OpenCV + Tracking** (detector.py) 🆕
 ```
 Loop infinito:
   1. Pega último frame capturado
@@ -495,12 +785,29 @@ Loop infinito:
      - Calcula ângulo em relação à câmera
      - Busca distância no LIDAR
      - Estima largura do buraco
-  5. Se encontrou buracos:
+  5. Atualiza Tracker com detecções:
+     - Compara com buracos já rastreados (IoU)
+     - Identifica NOVOS vs ATUALIZADOS
+  6. Para cada NOVO buraco:
+     ✨ Análise OpenCV Completa:
+     - Extrai contorno preciso
+     - Calcula área, perímetro, circularidade
+     - Converte pixels → metros
+     - Analisa textura
+     - Classifica severidade
      - Salva foto com anotações
-     - Registra no banco de dados
-  6. Atualiza estado para câmera desenhar
-  7. Repete
+     - Registra no banco com TODOS os dados
+  7. Para buracos ATUALIZADOS:
+     - Apenas atualiza display (não salva de novo)
+  8. Atualiza estado para câmera desenhar
+  9. Repete
 ```
+
+**Diferença da Fase 1:**
+- ✅ Tracker evita duplicatas no banco
+- ✅ OpenCV extrai 20+ métricas por buraco
+- ✅ Classificação automática de severidade
+- ✅ Log detalhado no console
 
 **Thread 3: Leitura LIDAR** (lidar_manager.py)
 ```
@@ -683,10 +990,154 @@ Este sistema é um **MVP (Minimum Viable Product)** que demonstra:
 - ✅ Persistência de dados (SQLite)
 - ✅ Interface web (Flask)
 - ✅ Arquitetura modular e extensível
+- 🆕 **Análise geométrica avançada (OpenCV)**
+- 🆕 **Tracking inteligente (evita duplicatas)**
+- 🆕 **Classificação automática de severidade**
 
 Cada módulo é independente e pode ser melhorado/testado separadamente!
 
 ---
 
+## 🆕 Novidades da Fase 1 (OpenCV + Tracking)
+
+### Dados Coletados por Buraco
+
+**Antes da Fase 1:**
+```json
+{
+  "bbox": [100, 150, 300, 280],
+  "confianca": 0.94,
+  "distancia_m": 2.3,
+  "largura_m": 0.45
+}
+```
+**Total: 7 campos**
+
+---
+
+**Depois da Fase 1:**
+```json
+{
+  "track_id": 1,
+  "bbox": [100, 150, 300, 280],
+  "confianca": 0.94,
+  "distancia_m": 2.3,
+  
+  "dimensoes_reais": {
+    "largura_m": 0.452,
+    "altura_m": 0.321,
+    "area_m2": 0.1145,
+    "perimetro_m": 1.423
+  },
+  
+  "geometria": {
+    "aspect_ratio": 1.18,
+    "circularidade": 0.82,
+    "convexidade": 0.91,
+    "orientacao_deg": 23.4
+  },
+  
+  "textura": {
+    "intensidade_media": 87.3,
+    "desvio_padrao": 24.1,
+    "contraste": 0.68
+  },
+  
+  "classificacao": {
+    "severidade": "media",
+    "prioridade": "media",
+    "necessita_reparo": true
+  }
+}
+```
+**Total: 21 campos** 🎉
+
+---
+
+### Benefícios Imediatos
+
+#### 1. Evita Duplicatas
+```
+Antes: 1 buraco = 30 registros no banco ❌
+Depois: 1 buraco = 1 registro no banco ✅
+```
+
+#### 2. Dados Mais Ricos
+```
+Antes: "Buraco detectado com 94% de confiança"
+Depois: "Buraco de 0.11 m², severidade MÉDIA, 
+         circularidade 0.82, necessita reparo"
+```
+
+#### 3. Priorização Automática
+```sql
+-- Buscar buracos graves que precisam reparo urgente
+SELECT * FROM buracos 
+WHERE severidade = 'grave' 
+  AND prioridade = 'alta'
+ORDER BY area_m2 DESC;
+```
+
+#### 4. Análises Estatísticas
+```python
+# Tamanho médio dos buracos
+SELECT AVG(area_m2) FROM buracos;
+
+# Buracos mais circulares vs irregulares
+SELECT severidade, AVG(circularidade) 
+FROM buracos 
+GROUP BY severidade;
+```
+
+---
+
+### Exemplo de Log Detalhado
+
+```
+============================================================
+✓ NOVO BURACO DETECTADO! Foto 1
+============================================================
+
+Buraco #1 (Track ID: 1):
+  Área: 0.1145 m²
+  Dimensões: 0.45m x 0.32m
+  Circularidade: 0.82
+  Severidade: MEDIA
+
+============================================================
+```
+
+---
+
+## 🎓 Conceitos Aprendidos na Fase 1
+
+### 1. IoU (Intersection over Union)
+- Métrica para comparar sobreposição de bounding boxes
+- Usado no tracking para identificar "mesmo buraco"
+- Valores de 0 (sem overlap) a 1 (idênticos)
+
+### 2. Segmentação de Imagem
+- Separar objeto (buraco) do fundo (asfalto)
+- Usa threshold adaptativo para lidar com iluminação variável
+- Resulta em contorno preciso do buraco
+
+### 3. Análise de Contornos
+- `cv2.contourArea()` - área exata ocupada
+- `cv2.arcLength()` - perímetro do contorno
+- `cv2.fitEllipse()` - ajusta elipse ao formato
+
+### 4. Descritores de Forma
+- **Circularidade**: O quão próximo de um círculo
+- **Convexidade**: O quão irregular é a borda
+- **Aspect Ratio**: Relação entre largura e altura
+
+### 5. Tracking Multi-Objeto
+- Manter identidade de objetos entre frames
+- Suavização de posição (evita tremidas)
+- Remoção automática de tracks antigos
+
+---
+
 **Criado em:** Janeiro 2026  
-**Versão:** 2.0 (Refatorado)
+**Versão:** 2.1 (Fase 1 - OpenCV + Tracking)  
+**Próxima Fase:** Mapeamento 2D Bird's Eye View
