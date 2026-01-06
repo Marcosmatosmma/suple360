@@ -17,7 +17,8 @@ def main():
         screenshot_dir = '/home/suple/Desktop/suple360v2/deteccoes'
         os.makedirs(screenshot_dir, exist_ok=True)
         
-        db_manager = DatabaseManager()
+        db_path = '/home/suple/Desktop/suple360v2/deteccoes/detections.db'
+        db_manager = DatabaseManager(db_path=db_path)
         print("✓ Banco de dados inicializado")
         
         lidar_manager = LidarManager(
