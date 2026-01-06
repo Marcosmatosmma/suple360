@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from depth_estimator import DepthEstimator
 
 
 class OpenCVAnalyzer:
@@ -14,7 +15,7 @@ class OpenCVAnalyzer:
     
     def __init__(self):
         """Inicializa o analisador OpenCV."""
-        pass
+        self.depth_estimator = DepthEstimator()
     
     def analisar_buraco(self, frame, bbox, distancia_m=None):
         """
@@ -53,6 +54,11 @@ class OpenCVAnalyzer:
         # Análise de textura
         textura = self._analisar_textura(gray)
         
+        # Análise de profundidade (Fase 3)
+        profundidade = self.depth_estimator.estimar_profundidade(
+            roi, distancia_m if distancia_m else 2.0, contorno
+        )
+        
         # Conversão para medidas reais (se temos distância do LIDAR)
         dimensoes_reais = self._converter_para_metros(
             geometria, distancia_m, largura_px, altura_px
@@ -78,6 +84,7 @@ class OpenCVAnalyzer:
                 'elipse_eixo_menor': geometria['elipse_eixo_menor']
             },
             'textura': textura,
+            'profundidade': profundidade,
             'classificacao': severidade
         }
     
@@ -321,6 +328,14 @@ class OpenCVAnalyzer:
                 'intensidade_media': 0,
                 'desvio_padrao': 0,
                 'contraste': 0
+            },
+            'profundidade': {
+                'gradiente_medio': 0.0,
+                'intensidade_sombra': 0.0,
+                'variacao_intensidade': 0.0,
+                'profundidade_score': 0.0,
+                'profundidade_cm': 0.0,
+                'classificacao': 'raso'
             },
             'classificacao': {
                 'severidade': 'desconhecida',
