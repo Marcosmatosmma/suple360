@@ -9,7 +9,7 @@ from tracker import BuracoTracker
 class Detector:
     """Gerencia detecção YOLO com fusão de dados LIDAR, análise OpenCV e tracking"""
     
-    def __init__(self, model, db_manager, lidar_manager, camera_manager, screenshot_dir, cam_hfov_deg=70.0):
+    def __init__(self, model, db_manager, lidar_manager, camera_manager, screenshot_dir, mapper=None, cam_hfov_deg=70.0):
         self.model = model
         self.db_manager = db_manager
         self.lidar_manager = lidar_manager
@@ -18,9 +18,12 @@ class Detector:
         self.cam_hfov_deg = cam_hfov_deg
         self.detection_counter = 0
         
-        # Novos módulos da Fase 1
+        # Módulos da Fase 1
         self.opencv_analyzer = OpenCVAnalyzer()
         self.tracker = BuracoTracker(iou_threshold=0.3, max_age_seconds=5.0)
+        
+        # Módulo da Fase 2
+        self.mapper = mapper  # MapBuilder (opcional)
     
     def detection_loop(self):
         """Loop de detecção contínua com análise OpenCV e tracking"""
@@ -81,11 +84,24 @@ class Detector:
                     
                     bbox = detection[:4]
                     dist_m = detection[5] if len(detection) > 5 else None
+                    angle_deg = self._calculate_angle(bbox, frame.shape[1])
                     
                     # Análise OpenCV
                     analysis = self.opencv_analyzer.analisar_buraco(frame, bbox, dist_m)
                     analysis['track_id'] = track_id
                     analysis_data.append(analysis)
+                    
+                    # Adiciona ao mapa (Fase 2)
+                    if self.mapper and dist_m:
+                        severidade = analysis['classificacao']['severidade']
+                        area_m2 = analysis['dimensoes_reais'].get('area_m2', 0.1)
+                        self.mapper.add_buraco(
+                            distancia_m=dist_m,
+                            angulo_deg=angle_deg,
+                            severidade=severidade,
+                            area_m2=area_m2,
+                            track_id=track_id
+                        )
                 
                 # Salva frame anotado
                 all_boxes = [b['detection'] for b in novos_buracos]
@@ -128,6 +144,28 @@ class Detector:
             all_current = novos_buracos + buracos_atualizados
             display_boxes = [b['detection'] for b in all_current]
             self.camera_manager.update_detections(display_boxes, text, color)
+            
+            # Atualiza LIDAR no mapa (Fase 2)
+            if self.mapper:
+                lidar_data = self.lidar_manager.get_data()
+                self.mapper.add_lidar_scan(lidar_data)
+    
+    def _calculate_angle(self, bbox, frame_width):
+        """
+        Calcula ângulo do buraco em relação ao centro da câmera.
+        
+        Args:
+            bbox: Tuple (x1, y1, x2, y2)
+            frame_width: Largura do frame em pixels
+            
+        Returns:
+            float: Ângulo em graus
+        """
+        x1, y1, x2, y2 = bbox
+        x_center = (x1 + x2) / 2.0
+        rel = (x_center / frame_width) - 0.5  # -0.5 a 0.5
+        angle_deg = rel * self.cam_hfov_deg
+        return angle_deg
     
     def start(self):
         """Inicia thread de detecção"""

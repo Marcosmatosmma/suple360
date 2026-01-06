@@ -3,9 +3,10 @@ import cv2
 import time
 import os
 import shutil
+import base64
 
 
-def create_app(db_manager, camera_manager, lidar_manager):
+def create_app(db_manager, camera_manager, lidar_manager, mapper=None):
     """Cria e configura aplicação Flask"""
     
     app = Flask(__name__, template_folder='templates', static_folder='static', static_url_path='/static')
@@ -155,5 +156,77 @@ def create_app(db_manager, camera_manager, lidar_manager):
         
         print(f"[ERRO] Imagem não encontrada: {filepath}")
         return jsonify({"error": f"Imagem não encontrada: {filename}"}), 404
+    
+    @app.route('/map')
+    def map_view():
+        """Página do mapa 2D"""
+        return render_template('map.html')
+    
+    @app.route('/api/map/current')
+    def get_current_map():
+        """Retorna imagem do mapa atual em base64"""
+        if not mapper:
+            return jsonify({"error": "Mapper não disponível"}), 503
+        
+        try:
+            mapa_img = mapper.render()
+            _, buffer = cv2.imencode('.png', mapa_img)
+            img_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            stats = mapper.get_statistics()
+            
+            return jsonify({
+                "success": True,
+                "image": f"data:image/png;base64,{img_base64}",
+                "statistics": stats
+            })
+        except Exception as e:
+            print(f"[ERRO] Ao gerar mapa: {str(e)}")
+            return jsonify({"error": str(e)}), 500
+    
+    @app.route('/api/map/statistics')
+    def get_map_statistics():
+        """Retorna estatísticas do mapa"""
+        if not mapper:
+            return jsonify({"error": "Mapper não disponível"}), 503
+        
+        try:
+            stats = mapper.get_statistics()
+            return jsonify(stats)
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.route('/api/map/clear', methods=['POST'])
+    def clear_map():
+        """Limpa o mapa"""
+        if not mapper:
+            return jsonify({"error": "Mapper não disponível"}), 503
+        
+        try:
+            mapper.clear()
+            return jsonify({"success": True, "message": "Mapa limpo"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    
+    @app.route('/api/map/export')
+    def export_map():
+        """Exporta mapa como imagem PNG"""
+        if not mapper:
+            return jsonify({"error": "Mapper não disponível"}), 503
+        
+        try:
+            timestamp = time.strftime('%Y%m%d_%H%M%S')
+            filename = f"mapa_{timestamp}.png"
+            filepath = f"/home/suple/Desktop/suple360v2/deteccoes/{filename}"
+            
+            mapper.export_image(filepath)
+            
+            return jsonify({
+                "success": True,
+                "filepath": filepath,
+                "filename": filename
+            })
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
     
     return app
